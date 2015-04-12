@@ -1,16 +1,16 @@
-%% @doc LogId -> {BaseLogId, Position} index.
+%% @doc LogId -> {SegId, Position} index.
 %% LogId: Strict monotonic non-negative positive integer ID
-%% BaseLogId: The fist log ID in a log segment file, BaseLogId is used as file name.
+%% SegId: The fist log ID in a log segment file, SegId is used as file name.
 %% Position: Log byte position (see file:position/1) in a segment file
 
 -module(gululog_idx).
 
 %% APIs
--export([init/1]).   %% Initialize log index from the given log file directory
--export([append/3]). %% Append a new log entry to index
--export([bump/2]). %% bump to a new segment
--export([bump_append/3]). %% bump then append
--export([locate/2]). %% Locate {SegId, Position} for a given LogId
+-export([init/1]).           %% Initialize log index from the given log file directory
+-export([append/3]).         %% Append a new log entry to index
+-export([bump/2]).           %% bump to a new segment
+-export([bump_append/3]).    %% bump then append
+-export([locate/2]).         %% Locate {SegId, Position} for a given LogId
 -export([get_last_logid/1]). %% last logid in ets
 
 -export_type([index/0]).
