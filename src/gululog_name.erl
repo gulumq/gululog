@@ -2,7 +2,7 @@
 
 -module(gululog_name).
 
--export([basename/1]).
+-export([from_segid/2]).
 -export([to_segid/1]).
 
 -include("gululog.hrl").
@@ -11,10 +11,9 @@
 -define(SEGID_LEN, 20). %% number of digits (1 bsl 64 - 1) in segment ID
 
 %% @doc Make log (segment/index) file name from segment ID.
--spec basename(segid()) -> filename().
-basename(SegId) when is_integer(SegId) ->
-  Name = integer_to_list(SegId),
-  pad0(Name, ?SEGID_LEN - length(Name)).
+-spec from_segid(dirname(), segid()) -> filename().
+from_segid(DirName, SegId) when is_integer(SegId) ->
+  filename:join(DirName, basename(SegId)).
 
 %% @doc Convert filename back to segment ID.
 -spec to_segid(filename()) -> segid().
@@ -23,6 +22,11 @@ to_segid(FileName) when is_list(FileName) ->
   list_to_integer(Basename).
 
 %% INTERNAL FUNCTIONS
+
+-spec basename(segid()) -> filename().
+basename(SegId) ->
+  Name = integer_to_list(SegId),
+  pad0(Name, ?SEGID_LEN - length(Name)).
 
 -spec pad0(filename(), non_neg_integer()) -> filename().
 pad0(Name, 0) -> Name;
