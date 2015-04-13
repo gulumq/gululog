@@ -8,9 +8,9 @@
 %% APIs
 -export([init/1]).           %% Initialize log index from the given log file directory
 -export([append/3]).         %% Append a new log entry to index
--export([bump/3]).           %% bump to a new segment
--export([bump_append/4]).    %% bump then append
--export([locate/2]).         %% Locate {SegId, Position} for a given LogId
+-export([switch/3]).         %% switch to a new segment
+-export([switch_append/4]).  %% switch then append
+-export([locate/3]).         %% Locate {SegId, Position} for a given LogId
 -export([get_last_logid/1]). %% last logid in ets
 
 -export_type([index/0]).
@@ -28,13 +28,13 @@
         {LogId, {SegId, Position}}).
 -define(TO_FILE_ENTRY(SegId, LogId, Position),
         <<(LogId - SegId):32, Position:32>>).
--define(FROM_FILE_ENTRY(SegId, FileEntryBin),
+-define(FROM_FILE_ENTRY_V1(SegId, FileEntryBin),
         begin
           <<Offset:32, Position:32>> = FileEntryBin,
           ?ETS_ENTRY(SegId, SegId + Offset, Position)
         end).
--define(FILE_ENTRY_BYTES, 8). %% Number of bytes in foile per index entry.
--define(FILE_ENTRY_BITS, 64). %% Number of bits in foile per index entry.
+-define(FILE_ENTRY_BYTES_V1, 8). %% Number of bytes in foile per index entry.
+-define(FILE_ENTRY_BITS_V1, 64). %% Number of bits in foile per index entry.
 -define(FILE_READ_CHUNK, (1 bsl 20)). %% Number of index entries per file read.
 -define(FILE_SUFFIX, ".idx").
 
@@ -43,9 +43,9 @@
 %% New index file is initialized if the given directry is empty
 %% @end
 -spec init(dirname()) -> index() | {error, no_return()}.
-init(DirName) ->
-  ok = filelib:ensure_dir(filename:join(DirName, "foo")),
-  IndexFiles = wildcard_reverse(DirName),
+init(Dir) ->
+  ok = filelib:ensure_dir(filename:join(Dir, "foo")),
+  IndexFiles = wildcard_reverse(Dir),
   LatestSegment = hd(IndexFiles),
   SegId = gululog_name:to_segid(LatestSegment),
   WriterFd = open_writer_fd(LatestSegment),
@@ -70,27 +70,27 @@ append(#idx{segid = SegId, fd = Fd, tid = Tid}, LogId, Position) ->
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
   ok.
 
-%% @doc Bump to a new log segment
--spec bump(dirname(), index(), segid()) -> index().
-bump(DirName, #idx{fd = Fd} = Idx, NewSegId) ->
-  NewFd = open_writer_fd(mk_name(DirName, NewSegId)),
+%% @doc Switch to a new log segment
+-spec switch(dirname(), index(), segid()) -> index().
+switch(Dir, #idx{fd = Fd} = Idx, NewSegId) ->
+  NewFd = open_writer_fd(mk_name(Dir, NewSegId)),
   ok = file:close(Fd),
   Idx#idx{segid = NewSegId, fd = NewFd}.
 
-%% @doc Bump to a new log segment, append new index entry.
--spec bump_append(dirname(), index(), logid(), position()) -> index().
-bump_append(DirName, Idx, LogId, Position) ->
-  NewIdx = bump(DirName, Idx, LogId),
+%% @doc Switch to a new log segment, append new index entry.
+-spec switch_append(dirname(), index(), logid(), position()) -> index().
+switch_append(Dir, Idx, LogId, Position) ->
+  NewIdx = switch(Dir, Idx, LogId),
   ok = append(NewIdx, LogId, Position),
   NewIdx.
 
 %% @doc Locate {SegId, Position} for a given LogId
-%% return {cached, {segid(), position()} if the given LogId is found in ets cache
-%% return {scan_from, {segid(), position()}} if it requres scaning log segment from the given position
+%% return {segid(), position()} if the given LogId is found
 %% return 'false' if not in valid range
 %% @end
--spec locate(index(), logid()) -> {segid(), position()} | false.
-locate(#idx{tid = Tid}, LogId) ->
+-spec locate(dirname(), index(), logid()) ->
+        {segid(), position()} | false | no_return().
+locate(Dir, #idx{tid = Tid}, LogId) ->
   case ets:lookup(Tid, LogId) of
     [] ->
       case is_out_of_range(Tid, LogId) of
@@ -98,11 +98,11 @@ locate(#idx{tid = Tid}, LogId) ->
           false;
         false ->
           PrevLogId = ets:prev(Tid, LogId),
-          [?ETS_ENTRY(SegId, PrevLogId, Position)] = ets:lookup(Tid, PrevLogId),
-          {scan_from, {SegId, Position}}
+          [?ETS_ENTRY(SegId, _, _)] = ets:lookup(Tid, PrevLogId),
+          scan_locate(Dir, SegId, LogId)
       end;
     [?ETS_ENTRY(SegId, LogId, Position)] ->
-      {cached, {SegId, Position}}
+      {SegId, Position}
   end.
 
 %% @doc Get last logid from index.
@@ -116,6 +116,31 @@ get_last_logid(#idx{tid = Tid}) ->
   end.
 
 %% INTERNAL FUNCTIONS
+
+%% @private Scan the index file to locate the log position in segment file
+%% This function is called only when ets cache is not hit
+%% @end
+-spec scan_locate(dirname(), segid(), logid()) ->
+        {segid(), position()} | no_return().
+scan_locate(Dir, SegId, LogId) ->
+  true = (LogId > SegId), %% assert
+  FileName = mk_name(Dir, SegId),
+  Fd = open_reader_fd(FileName),
+  try
+    {ok, <<Version:8>>} = file:read(Fd, 1),
+    scan_locate_per_vsn(Fd, SegId, LogId, Version)
+  after
+    file:close(Fd)
+  end.
+
+-spec scan_locate_per_vsn(file:fd(), segid(), logid(), logvsn()) ->
+        {segid(), position()} | no_return().
+scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
+  %% THe offset caculate by per-entry size + one byte version
+  Location = (LogId - SegId - 1) * ?FILE_ENTRY_BYTES_V1 + 1,
+  {ok, Bin} = file:pread(Fd, Location, ?FILE_ENTRY_BYTES_V1),
+  ?ETS_ENTRY(SegId, LogId, Position) = ?FROM_FILE_ENTRY_V1(SegId, Bin),
+  {SegId, Position}.
 
 %% @private Check if the given log ID is out of indexing range.
 %% 'true' when trying to locate a 'future' log
@@ -146,12 +171,12 @@ init_ets_from_index_files(Tid, [FileName | Rest]) ->
 
 -spec init_ets_from_index_file(logvsn(), ets:tid(), segid(), file:fd()) -> ok | no_return().
 init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
-  case file:read(Fd, ?FILE_ENTRY_BYTES* ?FILE_READ_CHUNK) of
+  case file:read(Fd, ?FILE_ENTRY_BYTES_V1 * ?FILE_READ_CHUNK) of
     eof ->
       ok;
     {ok, ChunkBin} ->
-      [ ets:insert(Tid, ?FROM_FILE_ENTRY(SegId, Entry))
-        || <<Entry:?FILE_ENTRY_BITS>> <= ChunkBin ],
+      [ ets:insert(Tid, ?FROM_FILE_ENTRY_V1(SegId, Entry))
+        || <<Entry:?FILE_ENTRY_BITS_V1>> <= ChunkBin ],
       init_ets_from_index_file(1, Tid, SegId, Fd)
   end.
 
@@ -160,16 +185,16 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% make one if the given directory is empty.
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
-wildcard_reverse(DirName) ->
-  case lists:reverse(lists:sort(filelib:wildcard(?FILE_SUFFIX, DirName))) of
-    [] -> [mk_name(DirName, 0)];
+wildcard_reverse(Dir) ->
+  case lists:reverse(lists:sort(filelib:wildcard(?FILE_SUFFIX, Dir))) of
+    [] -> [mk_name(Dir, 0)];
     L  -> L
   end.
 
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(filename()) -> file:fd() | no_return().
 open_writer_fd(FileName) ->
-  IsNew = case file:read_file_info(FileName)) of
+  IsNew = case file:read_file_info(FileName) of
             {ok, _}         -> false;
             {error, enoent} -> true
           end,

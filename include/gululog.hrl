@@ -9,6 +9,8 @@
 -type filename() :: string().
 -type dirname() :: string().
 -type logvsn()  :: 1..255.
+-type micro() :: pos_integer().
+-type bytecnt() :: pos_integer().
 
 -define(LOGVSN, 1).
 
