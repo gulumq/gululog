@@ -1,14 +1,13 @@
-%% @doc Log segment read/write cursor.
+%% @doc Log segment writer cursor.
 %%
 %% log entry binary layout
 %% <<LogID:64, Timestamp:64,
 %%   HeaderSize:32, BodySize:32,
 %%   Header/binary, Body/binary>>
 
--module(gululog_cur).
+-module(gululog_w_cur).
 
--export([reader_open/2]).
--export([writer_open/3]).
+-export([open/3]).
 -export([append/3]).
 -export([close/1]).
 
@@ -23,37 +22,19 @@
              , fd       :: file:fd()  %% fd for read/write
              }).
 
--record(meta, { logid       :: logid()
-              , timestamp   :: micro()
-              , header_size :: bytecnt()
-              , body_size   :: bytecnt()
-              }).
-
 -opaque cursor() :: #cur{}.
--type meta() :: #meta{}.
+-type header() :: binary().
+-type body() :: binary().
 
 -define(FILE_SUFFIX, ".log").
 -define(TAILER_BYTES, 4).
-
-%% @doc Open segment file in 'raw' mode for a reader.
--spec reader_open(dirname(), segid()) -> cursor() | no_return().
-reader_open(Dir, SegId) ->
-  FileName = mk_name(Dir, SegId),
-  {ok, Fd} = file:open(FileName, reader_modes()),
-  Version = read_version(Fd),
-  #cur{ version  = Version
-      , segid    = SegId
-      , logid    = SegId %% assume first entry have segid = logid
-      , position = 1
-      , fd       = Fd
-      }.
 
 %% @doc Open segment file in 'raw' mode for writer.
 %% LastIndexedPosition is the position of the last logid in index file.
 %% pass in LastIndexedPosition = 0 for a new segment
 %% @end
--spec writer_open(dirname(), segid(), position()) -> cursor() | no_return().
-writer_open(Dir, SegId, LastIndexedPosition) ->
+-spec open(dirname(), segid(), position()) -> cursor() | no_return().
+open(Dir, SegId, LastIndexedPosition) ->
   FileName = mk_name(Dir, SegId),
   {ok, Fd} = file:open(FileName, writer_modes()),
   case LastIndexedPosition =:= 0 of
@@ -69,11 +50,11 @@ writer_open(Dir, SegId, LastIndexedPosition) ->
     false ->
       Version = read_version(Fd),
       Meta = read_meta(Version, Fd, LastIndexedPosition),
-      LastLogSize = log_size(Version, Meta),
+      LastLogSize = log_size(Meta),
       {ok, Position} = file:position(Fd, LastIndexedPosition + LastLogSize),
       #cur{ version  = Version
           , segid    = SegId
-          , logid    = Meta#meta.logid + 1
+          , logid    = gululog_meta:logid(Meta)
           , position = Position
           , fd       = Fd
           }
@@ -84,17 +65,17 @@ writer_open(Dir, SegId, LastIndexedPosition) ->
 close(#cur{fd = Fd}) -> ok = file:close(Fd).
 
 %% @doc Append one log entry.
--spec append(cursor(), binary(), binary()) -> cursor().
+-spec append(cursor(), header(), body()) -> cursor().
 append(#cur{ version  = Version
            , logid    = LogId
            , fd       = Fd
            , position = Position
            } = Cursor, Header, Body) ->
   Timestamp = gululog_dt:os_micro(),
-  Meta = meta(Version, LogId, Timestamp, size(Header), size(Body)),
+  Meta = cululog_mets:new(Version, LogId, Timestamp, size(Header), size(Body)),
   ok = file:write(Fd, [Meta, Header, Body]),
   Cursor#cur{ logid    = LogId + 1 %% next log id
-            , position = Position + log_size(Version, Meta) %% next position
+            , position = Position + log_size(Meta) %% next position
             }.
 
 %% PRIVATE FUNCTIONS
@@ -107,28 +88,12 @@ read_version(Fd) ->
 
 mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?FILE_SUFFIX.
 
-reader_modes() -> [read, raw, binary].
+writer_modes() -> [write, read, raw, binary].
 
-writer_modes() -> [write | reader_modes()].
+-spec read_meta(logvsn(), file:fd(), position()) -> gululog_meta:meta().
+read_meta(Version, Fd, Position) ->
+  {ok, MetaBin} = file:pread(Fd, Position, gululog_meta:bytecnt(Version)),
+  gululog_meta:decode(Version, MetaBin).
 
--spec read_meta(logvsn(), file:fd(), position()) -> meta().
-read_meta(1, Fd, Position) ->
-  {ok, MetaBin} = file:pread(Fd, Position, meta_size(1)),
-  <<LogId:64, Timestamp:64, HeaderSize:32, BodySize:32>> = MetaBin,
-  #meta{ logid       = LogId
-       , timestamp   = Timestamp
-       , header_size = HeaderSize
-       , body_size   = BodySize
-       }.
-
--spec meta(logvsn(), logid(), micro(), bytecnt(), bytecnt()) -> binary().
-meta(1, LogId, Timestamp, HeaderSize, BodySize) ->
-   <<LogId:64, Timestamp:64, HeaderSize:32, BodySize:32>>.
-
--spec meta_size(logvsn()) -> bytecnt().
-meta_size(1) -> 24.
-
--spec log_size(logvsn(), meta()) -> bytecnt().
-log_size(1, #meta{header_size = HeaderSize, body_size = BodySize}) ->
-  meta_size(1) + HeaderSize + BodySize.
+log_size(Meta) -> gululog_meta:calculate_log_size(Meta).
 
