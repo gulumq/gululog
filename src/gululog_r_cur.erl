@@ -1,112 +1,137 @@
+%% @doc Log reader cursor
 
 -module(gululog_r_cur).
 
 -export([ open/2
-        , read/1
-        , read_meta/1
-        , read_header/1
-        , read_body/1
+        , read/2
         ]).
 
 -export_type([cursor/0]).
 
--include("gululog.hrl").
+-include("gululog_priv.hrl").
 
--define(FILE_SUFFIX, ".log").
-
--type op() :: {position, position()} | read_meta | read_header | read_body.
+-type meta() :: gululog_meta:meta().
 -type header() :: binary().
 -type body() :: binary().
--type meta() :: gululog_meta:meta().
--type cur_result() :: ok | eof | meta() | header() | body().
--opaque cursor() :: fun((op()) -> {cursor(), cur_result()} | no_return()).
--type log() :: {logid(), micro(), header(), body()}.
+-type log() :: gululog().
+-type optkey() :: sikip_body.
+-type option() :: optkey() | {optkey(), term()}.
+-type options() :: [option()].
+
+-record(rcur, { version  :: logvsn()
+              , segid    :: segid()
+              , fd       :: file:fd()
+              , meta     :: undefined | meta()
+              , ptr_at   :: meta | header | body %% pointer at
+              , position :: position()
+              }).
+
+-opaque cursor() :: #rcur{}.
 
 %% @doc Open segment file in 'raw' mode for a reader.
--spec open(dirname(), segid()) -> cursor() | no_return().
+-spec open(dirname(), segid()) -> empty | {ok, cursor()} | no_return().
 open(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
-  Version = read_version(Fd),
-  cursor(read_meta, Fd, Version).
-
-%% @doc Read one log including head and body.
--spec read(cursor()) -> {cursor(), log()}.
-read(Cursor0) ->
-  {Cursor1, Meta}   = read_meta(Cursor0),
-  {Cursor2, Header} = read_header(Cursor1),
-  {Cursor,  Body}   = read_body(Cursor2),
-  LogId = gululog_meta:logid(Meta),
-  Ts    = gululog_meta:timestamp(Meta),
-  {Cursor, {LogId, Ts, Header, Body}}.
-
--spec read_meta(cursor()) -> {cursor(), meta()} | eof.
-read_meta(Cursor) -> Cursor(read_meta).
-
--spec read_header(cursor()) -> {cursor(), header()}.
-read_header(Cursor) -> Cursor(read_header).
-
--spec read_body(cursor()) -> {cursor(), body()}.
-read_body(Cursor) -> Cursor(read_body).
-
-%% INTERNAL FUNCTIONS
-
--spec cursor(op(), file:fd(), term()) -> cursor().
-cursor(Op, Fd, Arg) ->
-  fun({position, Position}) ->
-    case Op =:= read_meta of
-      true ->
-        {ok, Position} = file:position(Fd, Position),
-        {cursor(read_meta, Fd, Arg), ok};
-      false ->
-        erlang:throw({bad_op, [ {unexpected, position}
-                              , {arg, Arg}
-                              ]})
-    end;
-    (Op_) ->
-    case Op_ =:= Op of
-      true  ->
-        try
-          read_and_move(Op, Fd, Arg)
-        catch C : E ->
-          _ = file:close(Fd),
-          erlang:throw({C, E, erlang:get_stacktrace()})
-        end;
-      false ->
-        _ = file:close(Fd),
-        erlang:throw({bad_op, [ {expected, Op}
-                              , {got, Op_}
-                              , {arg, Arg}]})
-    end
+  try read_version(Fd) of
+    empty ->
+      file:close(Fd),
+      empty;
+    VSN when is_integer(VSN) andalso VSN =< ?LOGVSN ->
+      #rcur{ version  = VSN
+           , segid    = SegId
+           , fd       = Fd
+           , meta     = undefined
+           , ptr_at   = meta
+           , position = 1
+           }
+  catch C : E ->
+    file:close(Fd),
+    erlang:raise(C, E, erlang:get_stacktrace())
   end.
 
--spec read_and_move(op(), file:fd(), logvsn() | meta()) ->
-        eof | {cursor(), cur_result()} | no_return().
-read_and_move(meta, Fd, Version) ->
-  case file:read(Fd, gululog_meta:bytecnt(Version)) of
-    eof ->
-      %% we assume here is the only place to deal with eof.
-      %% Meaning: a reader should never endup catching up to the
-      %% position where a writer is actively writting to
-      ok = file:close(Fd),
-      eof;
-    {ok, MetaBin} ->
-      Meta = gululog_meta:decode(MetaBin),
-      {cursor(header, Fd, Meta), Meta}
-  end;
-read_and_move(header, Fd, Meta) ->
-  {ok, Header} = file:read(Fd, gululog_meta:header_size(Meta)),
-  {cursor(body, Fd, Meta), Header};
-read_and_move(body, Fd, Meta) ->
-  {ok, Body} = file:read(Fd, gululog_meta:body_size(Meta)),
-  {cursor(meta, Fd, gululog_meta:version(Meta)), Body}.
+%% @doc Read one log including head and body.
+-spec read(cursor(), options()) -> {cursor(), log()}.
+read(#rcur{version = Version} = Cursor0, Options) ->
+  #rcur{meta = Meta} = Cursor1 = read_meta(Cursor0),
+  {Cursor2, Header} = read_header(Cursor1),
+  {Cursor,  Body} = maybe_read_body(Cursor2, Options),
+  ok = gululog_meta:assert_data_integrity(Version, Meta, [Header, Body]),
+  {Cursor, #gululog{ logid     = gululog_meta:logid(Meta)
+                   , logged_on = gululog_meta:logged_on(Meta)
+                   , header    = Header
+                   , body      = Body
+                   }}.
 
-mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?FILE_SUFFIX.
+%%% PRIVATE FUNCTIONS
+
+%% @private Read log meta data.
+-spec read_meta(cursor()) -> cursor().
+read_meta(#rcur{ version  = Version
+               , fd       = Fd
+               , ptr_at   = meta
+               , meta     = undefined
+               , position = Position
+               } = Cursor0) ->
+  Bytes = gululog_meta:bytecnt(Version),
+  {ok, MetaBin} = file:read(Fd, Bytes),
+  Meta = gululog_meta:decode(Version, MetaBin),
+  Cursor0#rcur{ ptr_at   = header
+              , meta     = Meta
+              , position = Position + Bytes
+              }.
+
+%% @private Read log header.
+-spec read_header(cursor()) -> {cursor(), header()}.
+read_header(#rcur{ fd       = Fd
+                 , ptr_at   = header
+                 , meta     = Meta
+                 , position = Position
+                 } = Cursor0) ->
+  Bytes = gululog_meta:header_size(Meta),
+  {ok, Header} = file:read(Fd, Bytes),
+  Cursor = Cursor0#rcur{ ptr_at   = body
+                       , position = Position + Bytes
+                       },
+  {Cursor, Header}.
+
+%% @private Read log body, return the new cursor and the log body binary
+%% in case skip_body is given in read options, undefined is returned
+%% the fd is positioned to the beginning of the nex log
+%% @end
+-spec maybe_read_body(cursor(), options()) ->
+        {cursor(), undefined | body()} | no_return().
+maybe_read_body(#rcur{ fd       = Fd
+                     , ptr_at   = header
+                     , meta     = Meta
+                     , position = Position
+                     } = Cursor0, Options) ->
+  Bytes = gululog_meta:body_size(Meta),
+  Body =
+    case proplists:get_bool(skip_body, Options) of
+      true ->
+        {ok, _} = file:position(Fd, Position + Bytes),
+        undefined;
+      false ->
+        {ok, Body_} = file:read(Fd, Bytes),
+        Body_
+    end,
+  Cursor = Cursor0#rcur{ ptr_at   = meta
+                       , position = Position + Bytes
+                       },
+  {Cursor, Body}.
 
 %% @private Read the first byte version number, position fd to location 1
--spec read_version(file:fd()) -> logvsn().
+%% Return 'empty' in case the file is empty or contains only a version byte
+%% @end
+-spec read_version(file:fd()) -> empty | logvsn() | no_return().
 read_version(Fd) ->
-  {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
-  Version.
+  case file:read(Fd, 1) of
+    eof                      -> empty;
+    {ok, <<Version:8>>}      -> Version;
+    {error, Reason}          -> erlang:error(Reason)
+  end.
 
+mk_name(Dir, SegId) ->
+  gululog_name:from_segid(Dir, SegId) ++ ?SEG_SUFFIX.
 

@@ -15,11 +15,12 @@
 
 -export_type([index/0]).
 
--include("gululog.hrl").
+-include("gululog_priv.hrl").
 
--record(idx, { segid :: segid()
-             , fd    :: file:fd()
-             , tid   :: ets:tid()
+-record(idx, { version :: logvsn()
+             , segid   :: segid()
+             , fd      :: file:fd()
+             , tid     :: ets:tid()
              }).
 
 -opaque index() :: #idx{}.
@@ -33,10 +34,9 @@
           <<Offset:32, Position:32>> = FileEntryBin,
           ?ETS_ENTRY(SegId, SegId + Offset, Position)
         end).
--define(FILE_ENTRY_BYTES_V1, 8). %% Number of bytes in foile per index entry.
--define(FILE_ENTRY_BITS_V1, 64). %% Number of bits in foile per index entry.
+-define(FILE_ENTRY_BYTES_V1, 8). %% Number of bytes in file per index entry.
+-define(FILE_ENTRY_BITS_V1, 64). %% Number of bits in file per index entry.
 -define(FILE_READ_CHUNK, (1 bsl 20)). %% Number of index entries per file read.
--define(FILE_SUFFIX, ".idx").
 
 %% @doc Initialize log index in the given directory.
 %% The directory is created if not exists already
@@ -65,7 +65,11 @@ init(Dir) ->
 %% 3. Position should be (at least MIN_LOG_SIZE) greater than the last position
 %% @end
 -spec append(index(), logid(), position()) -> ok | no_return().
-append(#idx{segid = SegId, fd = Fd, tid = Tid}, LogId, Position) ->
+append(#idx{ version = ?LOGVSN
+           , segid   = SegId
+           , fd      = Fd
+           , tid     = Tid
+           }, LogId, Position) ->
   ok = file:write(Fd, ?TO_FILE_ENTRY(SegId, LogId, Position)),
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
   ok.
@@ -154,7 +158,7 @@ is_out_of_range(Tid, LogId) ->
   (ets:first(Tid) > LogId).         %% too old
 
 %% @private Create ets table to keep the index entries.
-%% TODO: scarce indexing for earlier segments in case there are too many entries.
+%% TODO: less indexing for earlier segments in case there are too many entries.
 %% @end
 -spec init_ets_from_index_files(ets:tid(), [filename()]) -> ok | no_return().
 init_ets_from_index_files(_Tid, []) -> ok;
@@ -186,7 +190,7 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-  case lists:reverse(lists:sort(filelib:wildcard(?FILE_SUFFIX, Dir))) of
+  case lists:reverse(lists:sort(filelib:wildcard("*" ++ ?IDX_SUFFIX, Dir))) of
     [] -> [mk_name(Dir, 0)];
     L  -> L
   end.
@@ -210,5 +214,5 @@ open_reader_fd(FileName) ->
 
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
-mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?FILE_SUFFIX.
+mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?IDX_SUFFIX.
 

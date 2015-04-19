@@ -1,99 +1,87 @@
 %% @doc Log segment writer cursor.
 %%
 %% log entry binary layout
-%% <<LogID:64, Timestamp:64,
-%%   HeaderSize:32, BodySize:32,
-%%   Header/binary, Body/binary>>
+%% [ <<Meta/binary>> %% see gululog_meta.erl
+%% , <<Header/binary, Body/binary>>
+%% ]
 
 -module(gululog_w_cur).
 
--export([open/3]).
--export([append/3]).
+-export([open/1]).
+-export([append/4]).
 -export([close/1]).
 
 -export_type([cursor/0]).
 
--include("gululog.hrl").
+-include("gululog_priv.hrl").
 
--record(cur, { version  :: logvsn()
-             , segid    :: segid()    %% segment id
-             , logid    :: logid()    %% logid for next new log entry
-             , position :: position() %% position for next new log entry
-             , fd       :: file:fd()  %% fd for read/write
-             }).
+-record(wcur, { version  :: logvsn()
+              , segid    :: segid()    %% segment id
+              , position :: position() %% position for next new log entry
+              , fd       :: file:fd()  %% fd for read/write
+              }).
 
--opaque cursor() :: #cur{}.
+-opaque cursor() :: #wcur{}.
 -type header() :: binary().
 -type body() :: binary().
 
--define(FILE_SUFFIX, ".log").
 -define(TAILER_BYTES, 4).
 
-%% @doc Open segment file in 'raw' mode for writer.
-%% LastIndexedPosition is the position of the last logid in index file.
-%% pass in LastIndexedPosition = 0 for a new segment
+%% @doc Open the last segment file the given directory for writer to append.
 %% @end
--spec open(dirname(), segid(), position()) -> cursor() | no_return().
-open(Dir, SegId, LastIndexedPosition) ->
-  FileName = mk_name(Dir, SegId),
-  {ok, Fd} = file:open(FileName, writer_modes()),
-  case LastIndexedPosition =:= 0 of
-    true ->
-      %% a new segment
+-spec open(dirname()) -> cursor() | no_return().
+open(Dir) ->
+  FileName = case wildcard_reverse(Dir) of
+               []    -> mk_name(Dir, 0);
+               [F|_] -> F
+             end,
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  SegId = gululog_name:to_segid(FileName),
+  case SegId =:= 0 of
+    true  ->
       ok = file:write(Fd, <<?LOGVSN:8>>),
-      #cur{ version  = ?LOGVSN
-          , segid    = SegId
-          , logid    = SegId
-          , position = 1
-          , fd       = Fd
-          };
+      #wcur{ version  = ?LOGVSN
+           , segid    = SegId
+           , position = 1
+           , fd       = Fd
+           };
     false ->
-      Version = read_version(Fd),
-      Meta = read_meta(Version, Fd, LastIndexedPosition),
-      LastLogSize = log_size(Meta),
-      {ok, Position} = file:position(Fd, LastIndexedPosition + LastLogSize),
-      #cur{ version  = Version
-          , segid    = SegId
-          , logid    = gululog_meta:logid(Meta)
-          , position = Position
-          , fd       = Fd
-          }
+      {ok, <<Version:8>>} = file:read(Fd, 1),
+      true = (Version =< ?LOGVSN), %% assert
+      {ok, Position}  = file:position(Fd, eof),
+      #wcur{ version  = Version
+           , segid    = SegId
+           , position = Position
+           , fd       = Fd
+           }
   end.
 
 %% @doc Close fd for either writer or reader.
 -spec close(cursor()) -> ok | no_return().
-close(#cur{fd = Fd}) -> ok = file:close(Fd).
+close(#wcur{fd = Fd}) -> ok = file:close(Fd).
 
 %% @doc Append one log entry.
--spec append(cursor(), header(), body()) -> cursor().
-append(#cur{ version  = Version
-           , logid    = LogId
-           , fd       = Fd
-           , position = Position
-           } = Cursor, Header, Body) ->
-  Timestamp = gululog_dt:os_micro(),
-  Meta = cululog_mets:new(Version, LogId, Timestamp, size(Header), size(Body)),
-  ok = file:write(Fd, [Meta, Header, Body]),
-  Cursor#cur{ logid    = LogId + 1 %% next log id
-            , position = Position + log_size(Meta) %% next position
-            }.
+-spec append(cursor(), logid(), header(), body()) -> cursor().
+append(#wcur{ version  = Version
+            , fd       = Fd
+            , position = Position
+            } = Cursor, LogId, Header, Body) ->
+  Meta = gululog_meta:new(Version, LogId, size(Header), size(Body)),
+  MetaBin = gululog_meta:encode(Version, Meta, [Header, Body]),
+  ok = file:write(Fd, [MetaBin, Header, Body]),
+  NewPosition = Position + gululog_meta:calculate_log_size(Version, Meta),
+  Cursor#wcur{position = NewPosition}.
 
 %% PRIVATE FUNCTIONS
 
-%% @private Read the first byte version number, position fd to location 1
--spec read_version(file:fd()) -> logvsn().
-read_version(Fd) ->
-  {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
-  Version.
+%% @private Make a segment file name.
+mk_name(Dir, SegId) ->
+  gululog_name:from_segid(Dir, SegId) ++ ?SEG_SUFFIX.
 
-mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?FILE_SUFFIX.
-
-writer_modes() -> [write, read, raw, binary].
-
--spec read_meta(logvsn(), file:fd(), position()) -> gululog_meta:meta().
-read_meta(Version, Fd, Position) ->
-  {ok, MetaBin} = file:pread(Fd, Position, gululog_meta:bytecnt(Version)),
-  gululog_meta:decode(Version, MetaBin).
-
-log_size(Meta) -> gululog_meta:calculate_log_size(Meta).
+%% @private Find all the index files in the given directory
+%% return all filenames in reversed order.
+%% @end
+-spec wildcard_reverse(dirname()) -> [filename()].
+wildcard_reverse(Dir) ->
+  lists:reverse(lists:sort(filelib:wildcard("*" ++ ?SEG_SUFFIX, Dir))).
 

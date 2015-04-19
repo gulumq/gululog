@@ -5,7 +5,7 @@
 -export([from_segid/2]).
 -export([to_segid/1]).
 
--include("gululog.hrl").
+-include("gululog_priv.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(SEGID_LEN, 20). %% number of digits (1 bsl 64 - 1) in segment ID
