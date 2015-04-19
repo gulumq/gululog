@@ -5,13 +5,18 @@
 
 -module(gululog_idx).
 
-%% APIs
--export([init/1]).           %% Initialize log index from the given log file directory
--export([append/3]).         %% Append a new log entry to index
--export([switch/3]).         %% switch to a new segment
--export([switch_append/4]).  %% switch then append
--export([locate/3]).         %% Locate {SegId, Position} for a given LogId
--export([get_last_logid/1]). %% last logid in ets
+%% APIs for writer (owner)
+-export([ init/1           %% Initialize log index from the given log file directory
+        , close/1          %% close the writer cursor
+        , append/3         %% Append a new log entry to index
+        , switch/3         %% switch to a new segment
+        , switch_append/4  %% switch then append
+        ]).
+
+%% APIs for readers (public access)
+-export([ locate/3         %% Locate {SegId, Position} for a given LogId
+        , get_last_logid/1 %% last logid in ets
+        ]).
 
 -export_type([index/0]).
 
@@ -25,14 +30,14 @@
 
 -opaque index() :: #idx{}.
 
--define(ETS_ENTRY(SegId, LogId, Position),
-        {LogId, {SegId, Position}}).
--define(TO_FILE_ENTRY(SegId, LogId, Position),
-        <<(LogId - SegId):32, Position:32>>).
--define(FROM_FILE_ENTRY_V1(SegId, FileEntryBin),
+-define(ETS_ENTRY(SegId__, LogId__, Position__),
+        {LogId__, {SegId__, Position__}}).
+-define(TO_FILE_ENTRY(SegId__, LogId__, Position__),
+        <<(LogId__ - SegId__):32, Position__:32>>).
+-define(FROM_FILE_ENTRY_V1(SegId__, FileEntryBin__),
         begin
-          <<Offset:32, Position:32>> = FileEntryBin,
-          ?ETS_ENTRY(SegId, SegId + Offset, Position)
+          <<Offset__:32, Position__:32>> = <<FileEntryBin__:64>>,
+          ?ETS_ENTRY(SegId__, SegId__ + Offset__, Position__)
         end).
 -define(FILE_ENTRY_BYTES_V1, 8). %% Number of bytes in file per index entry.
 -define(FILE_ENTRY_BITS_V1, 64). %% Number of bits in file per index entry.
@@ -45,18 +50,30 @@
 -spec init(dirname()) -> index() | {error, no_return()}.
 init(Dir) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
-  IndexFiles = wildcard_reverse(Dir),
+  {IsNew, IndexFiles} = case wildcard_reverse(Dir) of
+                          []    -> {true, [mk_name(Dir, 0)]};
+                          Files -> {false, Files}
+                        end,
   LatestSegment = hd(IndexFiles),
   SegId = gululog_name:to_segid(LatestSegment),
-  WriterFd = open_writer_fd(LatestSegment),
+  {Version, WriterFd} = open_writer_fd(IsNew, LatestSegment),
   Tid = ets:new(?MODULE, [ ordered_set
                          , public
                          , {read_concurrency, true} ]),
   ok = init_ets_from_index_files(Tid, IndexFiles),
-  #idx{ segid = SegId
-      , fd    = WriterFd
-      , tid   = Tid
+  #idx{ version = Version
+      , segid   = SegId
+      , fd      = WriterFd
+      , tid     = Tid
       }.
+
+%% @doc Close write fd, delete ets cache table.
+-spec close(index()) -> ok.
+close(#idx{fd = Fd, tid = Tid}) ->
+  ok = file:sync(Fd),
+  ok = file:close(Fd),
+  true = ets:delete(Tid),
+  ok.
 
 %% @doc Append a new index entry.
 %% NB: There is no validation on the new LogId and Position to be appended
@@ -77,7 +94,7 @@ append(#idx{ version = ?LOGVSN
 %% @doc Switch to a new log segment
 -spec switch(dirname(), index(), segid()) -> index().
 switch(Dir, #idx{fd = Fd} = Idx, NewSegId) ->
-  NewFd = open_writer_fd(mk_name(Dir, NewSegId)),
+  {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
   ok = file:close(Fd),
   Idx#idx{segid = NewSegId, fd = NewFd}.
 
@@ -140,7 +157,7 @@ scan_locate(Dir, SegId, LogId) ->
 -spec scan_locate_per_vsn(file:fd(), segid(), logid(), logvsn()) ->
         {segid(), position()} | no_return().
 scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
-  %% THe offset caculate by per-entry size + one byte version
+  %% The offset caculate by per-entry size + one byte version
   Location = (LogId - SegId - 1) * ?FILE_ENTRY_BYTES_V1 + 1,
   {ok, Bin} = file:pread(Fd, Location, ?FILE_ENTRY_BYTES_V1),
   ?ETS_ENTRY(SegId, LogId, Position) = ?FROM_FILE_ENTRY_V1(SegId, Bin),
@@ -190,22 +207,20 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-  case lists:reverse(lists:sort(filelib:wildcard("*" ++ ?IDX_SUFFIX, Dir))) of
-    [] -> [mk_name(Dir, 0)];
-    L  -> L
-  end.
+  lists:map(
+    fun(FileName) ->
+      filename:join(Dir, FileName)
+    end, lists:reverse(lists:sort(filelib:wildcard("*" ++ ?IDX_SUFFIX, Dir)))).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
--spec open_writer_fd(filename()) -> file:fd() | no_return().
-open_writer_fd(FileName) ->
-  IsNew = case file:read_file_info(FileName) of
-            {ok, _}         -> false;
-            {error, enoent} -> true
-          end,
-  {ok, Fd} = file:open(FileName, [append, raw, binary]),
+-spec open_writer_fd(boolean(), filename()) -> file:fd() | no_return().
+open_writer_fd(IsNew, FileName) ->
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   %% Write the first 1 byte version number in case it's a new file
   [ok = file:write(Fd, <<?LOGVSN:8>>) || IsNew],
-  Fd.
+  {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
+  _ = file:position(Fd, eof),
+  {Version, Fd}.
 
 %% @private Open 'raw' mode fd for reader.
 open_reader_fd(FileName) ->

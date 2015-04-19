@@ -83,5 +83,8 @@ mk_name(Dir, SegId) ->
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-  lists:reverse(lists:sort(filelib:wildcard("*" ++ ?SEG_SUFFIX, Dir))).
+  lists:map(
+    fun(FileName) ->
+      filename:join(Dir, FileName)
+    end, lists:reverse(lists:sort(filelib:wildcard("*" ++ ?SEG_SUFFIX, Dir)))).
 
