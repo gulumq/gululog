@@ -13,6 +13,8 @@
 
 -export_type([cursor/0]).
 
+%%%*_ MACROS and SPECS =========================================================
+
 -include("gululog_priv.hrl").
 
 -record(wcur, { version  :: logvsn()
@@ -26,6 +28,8 @@
 -type body() :: binary().
 
 -define(TAILER_BYTES, 4).
+
+%%%*_ API FUNCTIONS ============================================================
 
 %% @doc Open the last segment file the given directory for writer to append.
 %% @end
@@ -66,13 +70,14 @@ append(#wcur{ version  = Version
             , fd       = Fd
             , position = Position
             } = Cursor, LogId, Header, Body) ->
+  Version = ?LOGVSN, %% assert
   Meta = gululog_meta:new(Version, LogId, size(Header), size(Body)),
   MetaBin = gululog_meta:encode(Version, Meta, [Header, Body]),
   ok = file:write(Fd, [MetaBin, Header, Body]),
   NewPosition = Position + gululog_meta:calculate_log_size(Version, Meta),
   Cursor#wcur{position = NewPosition}.
 
-%% PRIVATE FUNCTIONS
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Make a segment file name.
 mk_name(Dir, SegId) ->
@@ -85,3 +90,10 @@ mk_name(Dir, SegId) ->
 wildcard_reverse(Dir) ->
     gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_SEG).
 
+%%%*_ TESTS ====================================================================
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:

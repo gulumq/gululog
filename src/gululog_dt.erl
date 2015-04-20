@@ -10,10 +10,14 @@
         , utc_str_to_sec/1
         ]).
 
+%%%*_ MACROS and SPECS =========================================================
+
 -include("gululog_priv.hrl").
 
 -define(MEGA, 1000000).
 -define(EPOCH, 62167219200).
+
+%%%*_ API FUNCTIONS ============================================================
 
 -spec os_micro() -> os_micro().
 os_micro() ->
@@ -55,7 +59,7 @@ utc_str_to_micro(Str) ->
               end,
   (Gsec - ?EPOCH) * ?MEGA + MicroPart.
 
-%% INTERNAL FUNCTIONS
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 timestamp() -> os:timestamp().
 
@@ -67,3 +71,10 @@ micro_to_now(MicroSec) ->
    MicroSec div ?MEGA rem ?MEGA,
    MicroSec rem ?MEGA}.
 
+%%%*_ TESTS ====================================================================
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:

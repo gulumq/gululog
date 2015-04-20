@@ -6,10 +6,14 @@
 -export([to_segid/1]).
 -export([wildcard_full_path_name_reversed/2]).
 
+%%%*_ MACROS and SPECS =========================================================
+
 -include("gululog_priv.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(SEGID_LEN, 20). %% number of digits (1 bsl 64 - 1) in segment ID
+
+%%%*_ API FUNCTIONS ============================================================
 
 %% @doc Make log (segment/index) file name from segment ID.
 -spec from_segid(dirname(), segid()) -> filename().
@@ -30,7 +34,7 @@ wildcard_full_path_name_reversed(Dir, DotSuffix) ->
   lists:map(fun(FileName) -> filename:join(Dir, FileName) end,
             lists:reverse(lists:sort(filelib:wildcard("*" ++ DotSuffix, Dir)))).
 
-%% INTERNAL FUNCTIONS
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 -spec basename(segid()) -> filename().
 basename(SegId) ->
@@ -41,7 +45,7 @@ basename(SegId) ->
 pad0(Name, 0) -> Name;
 pad0(Name, N) -> pad0([$0 | Name], N-1).
 
-%% TESTS
+%%%*_ TESTS ====================================================================
 
 basename_test() ->
   ?assertEqual("00000000000000000000", basename(0)),
@@ -54,3 +58,9 @@ to_segid_test() ->
   ?assertEqual(1234567890123456789, to_segid("01234567890123456789")),
   ?assertEqual(18446744073709551615, to_segid("/foo/18446744073709551615.log")),
   ok.
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:

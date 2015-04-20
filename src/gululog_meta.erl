@@ -100,7 +100,7 @@ calculate_log_size(Version, #meta{ header_size = HeaderSize
                                  }) ->
   bytecnt(Version) + HeaderSize + BodySize.
 
-%%%*_ INTERNAL FUNCTIONS =======================================================
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 %%%*_ TESTS ====================================================================
 

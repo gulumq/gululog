@@ -140,7 +140,7 @@ get_last_logid(#idx{tid = Tid}) ->
     LogId           -> LogId
   end.
 
-%%%*_ INTERNAL FUNCTIONS =======================================================
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Scan the index file to locate the log position in segment file
 %% This function is called only when ets cache is not hit

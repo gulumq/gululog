@@ -8,6 +8,8 @@
 
 -export_type([cursor/0]).
 
+%%%*_ MACROS and SPECS =========================================================
+
 -include("gululog_priv.hrl").
 
 -type meta() :: gululog_meta:meta().
@@ -27,6 +29,8 @@
               }).
 
 -opaque cursor() :: #rcur{}.
+
+%%%*_ API FUNCTIONS ============================================================
 
 %% @doc Open segment file in 'raw' mode for a reader.
 -spec open(dirname(), segid()) -> empty | {ok, cursor()} | no_return().
@@ -62,7 +66,7 @@ read(#rcur{version = Version} = Cursor0, Options) ->
                    , body      = Body
                    }}.
 
-%%% PRIVATE FUNCTIONS
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Read log meta data.
 -spec read_meta(cursor()) -> cursor().
@@ -116,6 +120,7 @@ maybe_read_body(#rcur{ fd       = Fd
         Body_
     end,
   Cursor = Cursor0#rcur{ ptr_at   = meta
+                       , meta     = undefined
                        , position = Position + Bytes
                        },
   {Cursor, Body}.
@@ -134,3 +139,10 @@ read_version(Fd) ->
 mk_name(Dir, SegId) ->
   gululog_name:from_segid(Dir, SegId) ++ ?DOT_SEG.
 
+%%%*_ TESTS ====================================================================
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:
