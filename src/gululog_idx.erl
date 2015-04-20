@@ -210,7 +210,7 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-  gululog_name:wildcard_full_path_name_reversed(Dir, ?IDX_SUFFIX).
+  gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_IDX).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(boolean(), filename()) -> file:fd() | no_return().
@@ -229,7 +229,7 @@ open_reader_fd(FileName) ->
 
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
-mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?IDX_SUFFIX.
+mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?DOT_IDX.
 
 %%%*_ TESTS ====================================================================
 

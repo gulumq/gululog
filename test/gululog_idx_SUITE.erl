@@ -3,6 +3,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include("../src/gululog_priv.hrl").
 
 %% Test server callbacks
 -export([suite/0]).
@@ -17,17 +18,19 @@
         , t_init_from_existing/1
         ]).
 
+-define(config(KEY), proplists:get_value(KEY, Config)).
+
 suite() -> [{timetrap, {seconds,30}}].
 
 init_per_suite(Config) ->
-  Dir = filename:join([".", "tmp", atom_to_list(?MODULE)]),
+  Dir = filename:join([".", "test_data"]),
   [{dir, Dir} | Config].
 
 end_per_suite(_Config) -> ok.
 
 init_per_testcase(Case, Config) ->
-  {dir, Dir} = lists:keyfind(dir, 1, Config),
-  IdxFiles = filelib:wildcard("*.idx", Dir),
+  Dir = ?config(dir),
+  IdxFiles = filelib:wildcard("*" ++ ?DOT_IDX, Dir),
   lists:foreach(fun(File) ->
                   ok = file:delete(filename:join(Dir, File))
                 end, IdxFiles),
@@ -41,8 +44,6 @@ all() -> [F || {F, _A} <- module_info(exports),
                     "t_" ++ _ -> true;
                     _         -> false
                   end].
-
--define(config(KEY), proplists:get_value(KEY, Config)).
 
 %% @doc Test a basic indexing work flow.
 t_basic_flow({init, Config}) -> Config;

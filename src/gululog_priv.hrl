@@ -17,8 +17,8 @@
 -type bytecnt()  :: pos_integer().
 
 -define(LOGVSN, 1). %% Current version
--define(IDX_SUFFIX, ".idx").
--define(SEG_SUFFIX, ".seg").
+-define(DOT_IDX, ".idx").
+-define(DOT_SEG, ".seg").
 
 -endif.
 

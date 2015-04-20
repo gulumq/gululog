@@ -76,12 +76,12 @@ append(#wcur{ version  = Version
 
 %% @private Make a segment file name.
 mk_name(Dir, SegId) ->
-  gululog_name:from_segid(Dir, SegId) ++ ?SEG_SUFFIX.
+  gululog_name:from_segid(Dir, SegId) ++ ?DOT_SEG.
 
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-    gululog_name:wildcard_full_path_name_reversed(Dir, ?SEG_SUFFIX).
+    gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_SEG).
 

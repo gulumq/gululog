@@ -132,5 +132,5 @@ read_version(Fd) ->
   end.
 
 mk_name(Dir, SegId) ->
-  gululog_name:from_segid(Dir, SegId) ++ ?SEG_SUFFIX.
+  gululog_name:from_segid(Dir, SegId) ++ ?DOT_SEG.
 
