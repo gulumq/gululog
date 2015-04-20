@@ -4,6 +4,7 @@
 
 -export([from_segid/2]).
 -export([to_segid/1]).
+-export([wildcard_full_path_name_reversed/2]).
 
 -include("gululog_priv.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -20,6 +21,14 @@ from_segid(DirName, SegId) when is_integer(SegId) ->
 to_segid(FileName) when is_list(FileName) ->
   [Basename | _] = string:tokens(filename:basename(FileName), "."),
   list_to_integer(Basename).
+
+%% @doc Wildcard match in the given directory, retrun the full
+%% path name of the files with given .suffix in reversed order
+%% @end
+-spec wildcard_full_path_name_reversed(dirname(), string()) -> [filename()].
+wildcard_full_path_name_reversed(Dir, DotSuffix) ->
+  lists:map(fun(FileName) -> filename:join(Dir, FileName) end,
+            lists:reverse(lists:sort(filelib:wildcard("*" ++ DotSuffix, Dir)))).
 
 %% INTERNAL FUNCTIONS
 

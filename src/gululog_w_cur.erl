@@ -83,8 +83,5 @@ mk_name(Dir, SegId) ->
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-  lists:map(
-    fun(FileName) ->
-      filename:join(Dir, FileName)
-    end, lists:reverse(lists:sort(filelib:wildcard("*" ++ ?SEG_SUFFIX, Dir)))).
+    gululog_name:wildcard_full_path_name_reversed(Dir, ?SEG_SUFFIX).
 

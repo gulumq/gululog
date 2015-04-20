@@ -20,6 +20,8 @@
 
 -export_type([index/0]).
 
+%%%*_ MACROS and SPECS =========================================================
+
 -include("gululog_priv.hrl").
 
 -record(idx, { version :: logvsn()
@@ -30,18 +32,20 @@
 
 -opaque index() :: #idx{}.
 
--define(ETS_ENTRY(SegId__, LogId__, Position__),
-        {LogId__, {SegId__, Position__}}).
--define(TO_FILE_ENTRY(SegId__, LogId__, Position__),
-        <<(LogId__ - SegId__):32, Position__:32>>).
--define(FROM_FILE_ENTRY_V1(SegId__, FileEntryBin__),
+-define(ETS_ENTRY(SEGID_, LOGID_, POSITION_),
+        {LOGID_, {SEGID_, POSITION_}}).
+-define(TO_FILE_ENTRY(SEGID_, LOGID_, POSITION_),
+        <<(LOGID_ - SEGID_):32, POSITION_:32>>).
+-define(FROM_FILE_ENTRY_V1(SEGID_, FILE_ENTRY_BIG_INTEGER_),
         begin
-          <<Offset__:32, Position__:32>> = <<FileEntryBin__:64>>,
-          ?ETS_ENTRY(SegId__, SegId__ + Offset__, Position__)
+          <<OFFSET_:32, POSITION_:32>> = <<FILE_ENTRY_BIG_INTEGER_:64>>,
+          ?ETS_ENTRY(SEGID_, SEGID_ + OFFSET_, POSITION_)
         end).
 -define(FILE_ENTRY_BYTES_V1, 8). %% Number of bytes in file per index entry.
 -define(FILE_ENTRY_BITS_V1, 64). %% Number of bits in file per index entry.
 -define(FILE_READ_CHUNK, (1 bsl 20)). %% Number of index entries per file read.
+
+%%%*_ API FUNCTIONS ============================================================
 
 %% @doc Initialize log index in the given directory.
 %% The directory is created if not exists already
@@ -136,7 +140,7 @@ get_last_logid(#idx{tid = Tid}) ->
     LogId           -> LogId
   end.
 
-%% INTERNAL FUNCTIONS
+%%%*_ INTERNAL FUNCTIONS =======================================================
 
 %% @private Scan the index file to locate the log position in segment file
 %% This function is called only when ets cache is not hit
@@ -203,14 +207,10 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
-%% make one if the given directory is empty.
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) ->
-  lists:map(
-    fun(FileName) ->
-      filename:join(Dir, FileName)
-    end, lists:reverse(lists:sort(filelib:wildcard("*" ++ ?IDX_SUFFIX, Dir)))).
+  gululog_name:wildcard_full_path_name_reversed(Dir, ?IDX_SUFFIX).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(boolean(), filename()) -> file:fd() | no_return().
@@ -231,3 +231,10 @@ open_reader_fd(FileName) ->
 -spec mk_name(dirname(), segid()) -> filename().
 mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?IDX_SUFFIX.
 
+%%%*_ TESTS ====================================================================
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:

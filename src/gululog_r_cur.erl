@@ -58,7 +58,6 @@ read(#rcur{version = Version} = Cursor0, Options) ->
   {Cursor,  Body} = maybe_read_body(Cursor2, Options),
   ok = gululog_meta:assert_data_integrity(Version, Meta, [Header, Body]),
   {Cursor, #gululog{ logid     = gululog_meta:logid(Meta)
-                   , logged_on = gululog_meta:logged_on(Meta)
                    , header    = Header
                    , body      = Body
                    }}.

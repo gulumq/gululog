@@ -8,7 +8,6 @@
 -type gululog_body()      :: binary().
 
 -record(gululog, { logid     :: gululog_logid()
-                 , logged_on :: gululog_timestamp()
                  , header    :: gululog_header()
                  , body      :: undefined %% if skipped when reading
                               | gululog_body()

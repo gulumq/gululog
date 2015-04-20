@@ -1,7 +1,7 @@
 %% @doc Log meta bytes.
 %% binary layout
 %% <<MetaCRC:32, DataCRC:32, Meta/binary>>
-%% Where Meta = <<LogId:64, Timestamp:32, HeaderSize:32, BodySize:32>>
+%% Where Meta = <<LogId:64, HeaderSize:32, BodySize:32>>
 
 -module(gululog_meta).
 
@@ -10,7 +10,6 @@
         , bytecnt/1
         , calculate_log_size/2
         , logid/1
-        , logged_on/1
         , header_size/1
         , body_size/1
         , now_ts/0
@@ -21,11 +20,12 @@
 -export_type([ meta/0
              ]).
 
+%%%*_ MACROS and SPECS =========================================================
+
 -include("gululog_priv.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -record(meta, { logid        :: logid()
-              , logged_on    :: ts()
               , header_size  :: bytecnt()
               , body_size    :: bytecnt()
               , data_crc = 0 :: pos_integer()
@@ -40,22 +40,18 @@ now_ts() -> gululog_dt:os_sec().
 -spec logid(meta()) -> logid().
 logid(#meta{logid = LogId}) -> LogId.
 
--spec logged_on(meta()) -> ts().
-logged_on(#meta{logged_on = Ts}) -> Ts.
-
 -spec header_size(meta()) -> bytecnt().
 header_size(#meta{header_size = Hs}) -> Hs.
 
 -spec body_size(meta()) -> bytecnt().
 body_size(#meta{body_size = Bs}) -> Bs.
 
+%%%*_ API FUNCTIONS ============================================================
+
 %% @doc Create a new log meta info set.
-%% Take current os time as timestamp.
-%% @end
 -spec new(logvsn(), logid(), bytecnt(), bytecnt()) -> meta().
 new(1, LogId, HeaderSize, BodySize) ->
   #meta{ logid       = LogId
-       , logged_on   = gululog_dt:os_sec()
        , header_size = HeaderSize
        , body_size   = BodySize
        }.
@@ -63,11 +59,10 @@ new(1, LogId, HeaderSize, BodySize) ->
 %% @doc Encode meta info into binary.
 -spec encode(logvsn(), meta(), iodata()) -> binary().
 encode(1, #meta{ logid       = LogId
-               , logged_on   = Timestamp
                , header_size = HeaderSize
                , body_size   = BodySize
                }, LogData) ->
-   MetaBin = <<LogId:64, Timestamp:32, HeaderSize:32, BodySize:32>>,
+   MetaBin = <<LogId:64, HeaderSize:32, BodySize:32>>,
    MetaCRC = erlang:crc32(MetaBin),
    DataCRC = erlang:crc32(LogData),
    <<MetaCRC:32, DataCRC:32, MetaBin/binary>>.
@@ -79,9 +74,8 @@ encode(1, #meta{ logid       = LogId
 decode(Version = 1, <<MetaCRC:32, DataCRC:32, MetaBin/binary>>) ->
   [erlang:throw(bad_size)  || erlang:size(MetaBin) =/= (bytecnt(Version) - 8)],
   [erlang:throw(corrupted_meta) || erlang:crc32(MetaBin) =/= MetaCRC],
-  <<LogId:64, Timestamp:32, HeaderSize:32, BodySize:32>> = MetaBin,
+  <<LogId:64, HeaderSize:32, BodySize:32>> = MetaBin,
   #meta{ logid       = LogId
-       , logged_on   = Timestamp
        , header_size = HeaderSize
        , body_size   = BodySize
        , data_crc    = DataCRC
@@ -94,8 +88,10 @@ assert_data_integrity(1, #meta{data_crc = CRC}, Data) ->
   ok.
 
 %% @doc Per-version meta size in file.
+%% For reader, must support all versions.
+%% @end
 -spec bytecnt(logvsn()) -> bytecnt().
-bytecnt(1) -> 28.
+bytecnt(1) -> 24.
 
 %% @doc Calculate the entire log entry size.
 -spec calculate_log_size(logvsn(), meta()) -> bytecnt().
@@ -104,7 +100,9 @@ calculate_log_size(Version, #meta{ header_size = HeaderSize
                                  }) ->
   bytecnt(Version) + HeaderSize + BodySize.
 
-%%% TESTs
+%%%*_ INTERNAL FUNCTIONS =======================================================
+
+%%%*_ TESTS ====================================================================
 
 v1_size_test() ->
   Meta = new(1, 1, 0, 1),
@@ -113,3 +111,8 @@ v1_size_test() ->
   Size = bytecnt(1),
   ?assertEqual(Size, size(Bin)).
 
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:
