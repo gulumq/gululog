@@ -100,7 +100,7 @@ read_header(#rcur{ fd       = Fd
 
 %% @private Read log body, return the new cursor and the log body binary
 %% in case skip_body is given in read options, undefined is returned
-%% the fd is positioned to the beginning of the nex log
+%% the fd is positioned to the beginning of the next log
 %% @end
 -spec maybe_read_body(cursor(), options()) ->
         {cursor(), undefined | body()} | no_return().
