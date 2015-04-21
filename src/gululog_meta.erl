@@ -114,7 +114,7 @@ calculate_log_size(Version, #meta{ header_size = HeaderSize
 v1_size_test() ->
   Meta = new(1, 1, 0, 1),
   Bin = encode(1, Meta, <<>>, <<>>),
-  ?assertEqual({ok, Meta}, decode(1, Bin)),
+  ?assertEqual(Meta#meta{header_crc = 0, body_crc = 0}, decode(1, Bin)),
   Size = bytecnt(1),
   ?assertEqual(Size, size(Bin)).
 
