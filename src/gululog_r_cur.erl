@@ -4,6 +4,7 @@
 
 -export([ open/2
         , read/2
+        , close/1
         ]).
 
 -export_type([cursor/0]).
@@ -13,8 +14,6 @@
 -include("gululog_priv.hrl").
 
 -type meta() :: gululog_meta:meta().
--type header() :: binary().
--type body() :: binary().
 -type log() :: gululog().
 -type optkey() :: sikip_body.
 -type option() :: optkey() | {optkey(), term()}.
@@ -54,13 +53,17 @@ open(Dir, SegId) ->
     erlang:raise(C, E, erlang:get_stacktrace())
   end.
 
+%% @doc Close reader cursor.
+-spec close(cursor()) -> ok.
+close(#rcur{fd = Fd}) -> file:close(Fd).
+
 %% @doc Read one log including head and body.
 -spec read(cursor(), options()) -> {cursor(), log()}.
 read(#rcur{version = Version} = Cursor0, Options) ->
   #rcur{meta = Meta} = Cursor1 = read_meta(Cursor0),
   {Cursor2, Header} = read_header(Cursor1),
   {Cursor,  Body} = maybe_read_body(Cursor2, Options),
-  ok = gululog_meta:assert_data_integrity(Version, Meta, [Header, Body]),
+  ok = gululog_meta:assert_data_integrity(Version, Meta, Header, Body),
   {Cursor, #gululog{ logid     = gululog_meta:logid(Meta)
                    , header    = Header
                    , body      = Body
@@ -105,7 +108,7 @@ read_header(#rcur{ fd       = Fd
 -spec maybe_read_body(cursor(), options()) ->
         {cursor(), undefined | body()} | no_return().
 maybe_read_body(#rcur{ fd       = Fd
-                     , ptr_at   = header
+                     , ptr_at   = body
                      , meta     = Meta
                      , position = Position
                      } = Cursor0, Options) ->

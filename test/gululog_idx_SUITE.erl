@@ -29,11 +29,7 @@ init_per_suite(Config) ->
 end_per_suite(_Config) -> ok.
 
 init_per_testcase(Case, Config) ->
-  Dir = ?config(dir),
-  IdxFiles = filelib:wildcard("*" ++ ?DOT_IDX, Dir),
-  lists:foreach(fun(File) ->
-                  ok = file:delete(filename:join(Dir, File))
-                end, IdxFiles),
+  ok = gululog_test_lib:cleanup(?config(dir)),
   ?MODULE:Case({init, Config}).
 
 end_per_testcase(Case, Config) ->

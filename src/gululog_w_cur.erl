@@ -24,8 +24,6 @@
               }).
 
 -opaque cursor() :: #wcur{}.
--type header() :: binary().
--type body() :: binary().
 
 -define(TAILER_BYTES, 4).
 
@@ -35,6 +33,7 @@
 %% @end
 -spec open(dirname()) -> cursor() | no_return().
 open(Dir) ->
+  ok = filelib:ensure_dir(filename:join(Dir, "foo")),
   FileName = case wildcard_reverse(Dir) of
                []    -> mk_name(Dir, 0);
                [F|_] -> F
@@ -72,7 +71,7 @@ append(#wcur{ version  = Version
             } = Cursor, LogId, Header, Body) ->
   Version = ?LOGVSN, %% assert
   Meta = gululog_meta:new(Version, LogId, size(Header), size(Body)),
-  MetaBin = gululog_meta:encode(Version, Meta, [Header, Body]),
+  MetaBin = gululog_meta:encode(Version, Meta, Header, Body),
   ok = file:write(Fd, [MetaBin, Header, Body]),
   NewPosition = Position + gululog_meta:calculate_log_size(Version, Meta),
   Cursor#wcur{position = NewPosition}.

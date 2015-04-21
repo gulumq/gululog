@@ -15,6 +15,8 @@
 -type dirname()  :: string().
 -type logvsn()   :: 1..255.
 -type bytecnt()  :: pos_integer().
+-type header()   :: binary().
+-type body()     :: binary().
 
 -define(LOGVSN, 1). %% Current version
 -define(DOT_IDX, ".idx").
