@@ -11,6 +11,7 @@
         , append/3         %% Append a new log entry to index
         , switch/3         %% switch to a new segment
         , switch_append/4  %% switch then append
+        , delete/2         %% Delete oldest segment from index
         ]).
 
 %% APIs for readers (public access)
@@ -94,6 +95,22 @@ append(#idx{ version = ?LOGVSN
   ok = file:write(Fd, ?TO_FILE_ENTRY(SegId, LogId, Position)),
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
   ok.
+
+%% @doc Delete oldest segment from index
+%% return 'ok'
+%% @end
+-spec delete(dirname(), index()) -> ok.
+delete(Dir, #idx{tid = Tid} = Index) ->
+  case get_oldest_segid(Index) of
+    false ->
+      ok;
+    SegId ->
+      ets:select_delete(Tid, [{{'$1', {'$2', '$3'}},
+                              [{'=:=', SegId, '$2'}],
+                              [true]}]),
+      file:delete(mk_name(Dir, SegId)),
+      ok
+  end.
 
 %% @doc Switch to a new log segment
 -spec switch(dirname(), index(), segid()) -> index().
@@ -230,6 +247,17 @@ open_reader_fd(FileName) ->
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
 mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?DOT_IDX.
+
+%% @private Get oldest segid from index
+-spec get_oldest_segid(index()) -> logid() | false.
+get_oldest_segid(#idx{tid = Tid}) ->
+  case ets:first(Tid) of
+    '$end_of_table' ->
+      false;
+    LogId ->
+      [{LogId, {SegId, _}}] = ets:lookup(Tid, LogId),
+      SegId
+  end.
 
 %%%*_ TESTS ====================================================================
 

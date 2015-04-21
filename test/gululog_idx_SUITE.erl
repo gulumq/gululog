@@ -20,6 +20,12 @@
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
 
+-record(idx, { version :: logvsn()
+             , segid   :: segid()
+             , fd      :: file:fd()
+             , tid     :: ets:tid()
+             }).
+
 suite() -> [{timetrap, {seconds,30}}].
 
 init_per_suite(Config) ->
@@ -66,6 +72,14 @@ t_basic_flow(Config) ->
                   ?assertEqual(ExpectedLocation, Location)
                 end, Expects),
   ?assertEqual(4, gululog_idx:get_last_logid(Index)),
+  [{0, {ToDeleteSegid, _}}] = ets:lookup(Index#idx.tid, 0),
+  ?assertEqual(ok, gululog_idx:delete(Dir, Index)),
+  ?assertEqual([], ets:lookup(Index#idx.tid, 0)),
+  ?assertEqual(0, ets:select_count(Index#idx.tid, [{{'$1', {'$2', '$3'}},
+                                                   [{'=:=', ToDeleteSegid, '$2'}],
+                                                   [true]}])),
+  ?assertEqual(false, lists:member(gululog_name:from_segid(Dir, ToDeleteSegid) ++ ".idx",
+                                   gululog_name:wildcard_full_path_name_reversed(Dir, ".idx"))),
   ok.
 
 %% @doc Init from existing files.
