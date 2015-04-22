@@ -14,10 +14,6 @@
 
 -include("gululog_priv.hrl").
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
 -define(MEGA, 1000000).
 -define(EPOCH, 62167219200).
 
@@ -78,6 +74,7 @@ micro_to_now(MicroSec) ->
 %%%*_ TESTS ====================================================================
 
 -ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 
 gululog_dt_test_() ->
   {setup,

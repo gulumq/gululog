@@ -9,7 +9,6 @@
 %%%*_ MACROS and SPECS =========================================================
 
 -include("gululog_priv.hrl").
--include_lib("eunit/include/eunit.hrl").
 
 -define(SEGID_LEN, 20). %% number of digits (1 bsl 64 - 1) in segment ID
 
@@ -47,6 +46,9 @@ pad0(Name, N) -> pad0([$0 | Name], N-1).
 
 %%%*_ TESTS ====================================================================
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
 basename_test() ->
   ?assertEqual("00000000000000000000", basename(0)),
   ?assertEqual("01234567890123456789", basename(1234567890123456789)),
@@ -58,6 +60,14 @@ to_segid_test() ->
   ?assertEqual(1234567890123456789, to_segid("01234567890123456789")),
   ?assertEqual(18446744073709551615, to_segid("/foo/18446744073709551615.log")),
   ok.
+
+from_segid_test() ->
+  ?assertEqual("./segment/00000000000000000000", from_segid("./segment", 0)),
+  ?assertEqual("segment/01234567890123456789", from_segid("segment", 1234567890123456789)),
+  ?assertEqual("./segment/18446744073709551615", from_segid("./segment/", 1 bsl 64 - 1)),
+  ok.
+
+-endif.
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
