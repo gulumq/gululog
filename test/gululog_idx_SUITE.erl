@@ -47,7 +47,7 @@ t_basic_flow({'end', _Config}) -> ok;
 t_basic_flow(Config) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
-  ?assertEqual(false, gululog_idx:get_last_logid(Index0)),
+  ?assertEqual(false, gululog_idx:get_latest_logid(Index0)),
   ok = gululog_idx:append(Index0, 0, 1),
   ok = gululog_idx:append(Index0, 1, 10),
   ok = gululog_idx:append(Index0, 2, 40),
@@ -65,7 +65,19 @@ t_basic_flow(Config) ->
                   Location = gululog_idx:locate(Dir, Index, LogId),
                   ?assertEqual(ExpectedLocation, Location)
                 end, Expects),
-  ?assertEqual(4, gululog_idx:get_last_logid(Index)),
+  ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
+  %% delete segment 0
+  ?assertEqual(0, gululog_idx:delete_oldest_seg(Dir, Index)),
+  %% delete segment 3
+  ?assertEqual(3, gululog_idx:delete_oldest_seg(Dir, Index)),
+  %% verify that segment 4 is still there
+  ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
+  %% delete segment 4
+  ?assertEqual(4, gululog_idx:delete_oldest_seg(Dir, Index)),
+  %% nothing left (segment 5 is empty)
+  ?assertEqual(false, gululog_idx:delete_oldest_seg(Dir, Index)),
+  %% verify nothing left
+  ?assertEqual(false, gululog_idx:get_latest_logid(Index)),
   ok.
 
 %% @doc Init from existing files.
@@ -83,7 +95,7 @@ t_init_from_existing({'end', _Config}) ->
 t_init_from_existing(Config) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
-  ?assertEqual(3, gululog_idx:get_last_logid(Index0)),
+  ?assertEqual(3, gululog_idx:get_latest_logid(Index0)),
   Expects = [ {0, {0, 1}}
             , {1, {0, 10}}
             , {2, {2, 3}}
@@ -96,6 +108,6 @@ t_init_from_existing(Config) ->
                   Location = gululog_idx:locate(Dir, Index, LogId),
                   ?assertEqual(ExpectedLocation, Location)
                 end, Expects),
-  ?assertEqual(4, gululog_idx:get_last_logid(Index)),
+  ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
   ok.
 

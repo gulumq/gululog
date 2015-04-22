@@ -6,16 +6,17 @@
 -module(gululog_idx).
 
 %% APIs for writer (owner)
--export([ init/1           %% Initialize log index from the given log file directory
-        , close/1          %% close the writer cursor
-        , append/3         %% Append a new log entry to index
-        , switch/3         %% switch to a new segment
-        , switch_append/4  %% switch then append
+-export([ init/1              %% Initialize log index from the given log file directory
+        , close/1             %% close the writer cursor
+        , append/3            %% Append a new log entry to index
+        , switch/3            %% switch to a new segment
+        , switch_append/4     %% switch then append
+        , delete_oldest_seg/2 %% Delete oldest segment from index
         ]).
 
 %% APIs for readers (public access)
 -export([ locate/3         %% Locate {SegId, Position} for a given LogId
-        , get_last_logid/1 %% last logid in ets
+        , get_latest_logid/1 %% latest logid in ets
         ]).
 
 -export_type([index/0]).
@@ -23,6 +24,7 @@
 %%%*_ MACROS and SPECS =========================================================
 
 -include("gululog_priv.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 -record(idx, { version :: logvsn()
              , segid   :: segid()
@@ -82,8 +84,8 @@ close(#idx{fd = Fd, tid = Tid}) ->
 %% @doc Append a new index entry.
 %% NB: There is no validation on the new LogId and Position to be appended
 %% 1. LogId should be equal to SegId when appending to a new segment
-%% 2. LogId should be monotonic. i.e. NewLogId >= LastLogId + 1
-%% 3. Position should be (at least MIN_LOG_SIZE) greater than the last position
+%% 2. LogId should be monotonic. i.e. NewLogId >= LatestLogId + 1
+%% 3. Position should be (at least MIN_LOG_SIZE) greater than the latest position
 %% @end
 -spec append(index(), logid(), position()) -> ok | no_return().
 append(#idx{ version = ?LOGVSN
@@ -94,6 +96,27 @@ append(#idx{ version = ?LOGVSN
   ok = file:write(Fd, ?TO_FILE_ENTRY(SegId, LogId, Position)),
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
   ok.
+
+%% @doc Delete oldest segment from index
+%% return the segid that is deleted, return 'false' in case:
+%% 1. nothing to delete
+%% 2. the oldest is also the latest, it is considered as purging
+%%    the entire log, which is not a usual use case, it should be done
+%%    using purge/1
+%% @end
+-spec delete_oldest_seg(dirname(), index()) -> boolean() | segid().
+delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
+  case get_oldest_segid(Index) of
+    false ->
+      false;
+    SegIdToDelete when SegIdToDelete < CurrentSegId ->
+      Ms = ets:fun2ms(fun(?ETS_ENTRY(SegId, _, _)) -> SegId =:= SegIdToDelete end),
+      _ = ets:select_delete(Tid, Ms),
+      ok = file:delete(mk_name(Dir, SegIdToDelete)),
+      SegIdToDelete;
+    _ ->
+      false
+  end.
 
 %% @doc Switch to a new log segment
 -spec switch(dirname(), index(), segid()) -> index().
@@ -130,11 +153,11 @@ locate(Dir, #idx{tid = Tid}, LogId) ->
       {SegId, Position}
   end.
 
-%% @doc Get last logid from index.
+%% @doc Get latest logid from index.
 %% return 'false' iif it is an empty index.
 %% @end
--spec get_last_logid(index()) -> logid() | false.
-get_last_logid(#idx{tid = Tid}) ->
+-spec get_latest_logid(index()) -> logid() | false.
+get_latest_logid(#idx{tid = Tid}) ->
   case ets:last(Tid) of
     '$end_of_table' -> false;
     LogId           -> LogId
@@ -173,10 +196,10 @@ scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
 %% @end
 -spec is_out_of_range(ets:tid(), logid()) -> boolean().
 is_out_of_range(Tid, LogId) ->
-  Last = ets:last(Tid),
-  (Last =:= '$end_of_table') orelse %% empty table
-  (Last < LogId)             orelse %% too new
-  (ets:first(Tid) > LogId).         %% too old
+  Latest = ets:last(Tid),
+  (Latest =:= '$end_of_table') orelse %% empty table
+  (Latest < LogId)             orelse %% too new
+  (ets:first(Tid) > LogId).           %% too old
 
 %% @private Create ets table to keep the index entries.
 %% TODO: less indexing for earlier segments in case there are too many entries.
@@ -230,6 +253,17 @@ open_reader_fd(FileName) ->
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
 mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?DOT_IDX.
+
+%% @private Get oldest segid from index
+-spec get_oldest_segid(index()) -> logid() | false.
+get_oldest_segid(#idx{tid = Tid}) ->
+  case ets:first(Tid) of
+    '$end_of_table' ->
+      false;
+    LogId ->
+      [{LogId, {SegId, _}}] = ets:lookup(Tid, LogId),
+      LogId = SegId %% assert
+  end.
 
 %%%*_ TESTS ====================================================================
 

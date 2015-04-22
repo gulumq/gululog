@@ -33,7 +33,7 @@ os_sec() ->
 micro_to_utc_str(Micro) ->
   Sec = Micro div ?MEGA,
   Mic = Micro rem ?MEGA,
-  sec_to_utc_str(Sec) ++ lists:fmatten(".~4.4.0w", [Mic]).
+  sec_to_utc_str(Sec) ++ lists:flatten(io_lib:format(".~6.6.0w", [Mic])).
 
 -spec sec_to_utc_str(os_sec()) -> string().
 sec_to_utc_str(Sec) ->

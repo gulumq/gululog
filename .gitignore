@@ -2,4 +2,5 @@ ebin
 logs
 *.beam
 .rebar
+test/gululog_ut_SUITE.erl
 
