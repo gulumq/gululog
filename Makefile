@@ -3,13 +3,16 @@
 
 all: compile
 
-REBAR=$(shell which rebar > /dev/null 2>&1 && echo "rebar" || "./rebar")
+REBAR=$(shell ./rebar --version > /dev/null 2>&1 && echo "./rebar" || echo "rebar")
 
 deps:
 	$(REBAR) get-deps
 
 compile:
 	$(REBAR) compile
+
+ut:
+	$(REBAR) eunit
 
 ct: compile
 	$(REBAR) ct
