@@ -4,10 +4,10 @@
 ERL_FILES="$(find ebin/*.beam -type f -printf "%f\0" | xargs -0 -I{} basename {} .beam)"
 MODULES="$(echo $ERL_FILES | tr ' ' ',')"
 
-# Erlang code find modules that has test/0 exported
+# Erlang code find modules with test/0 exported
 CODE="[io:format([io_lib:print(Module), $ ]) || Module <- [$MODULES], lists:member({test, 0}, Module:module_info(exports))]"
 
-# All modules has test/0 exported
+# All modules with test/0 exported
 UT_MODULES="$(erl -pa ebin -noshell -eval "$CODE" -s init stop)"
 
 cp test/gululog_ut_SUITE.erl.in test/gululog_ut_SUITE.erl
