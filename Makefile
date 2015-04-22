@@ -1,5 +1,5 @@
 
-.PHONY: deps compile rel
+.PHONY: deps compile rel tests
 
 all: compile
 
@@ -17,3 +17,4 @@ ut:
 ct: compile
 	$(REBAR) ct
 
+tests: ut ct
