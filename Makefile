@@ -1,17 +1,14 @@
 
-.PHONY: deps compile rel tests
+.PHONY: compile rel tests
 
 all: compile
 
-REBAR=$(shell ./rebar --version > /dev/null 2>&1 && echo "./rebar" || echo "rebar")
+REBAR ?= $(shell which ./rebar 2>/dev/null || which rebar)
 
-deps:
-	$(REBAR) get-deps
-
-compile: deps
+compile:
 	$(REBAR) compile
 
-ut: deps
+ut:
 	$(REBAR) skip_deps=true eunit
 
 ct: compile
