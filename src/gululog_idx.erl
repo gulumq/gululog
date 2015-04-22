@@ -104,7 +104,7 @@ append(#idx{ version = ?LOGVSN
 %%    the entire log, which is not a usual use case, it should be done
 %%    using purge/1
 %% @end
--spec delete_oldest_seg(dirname(), index()) -> boolean().
+-spec delete_oldest_seg(dirname(), index()) -> boolean() | segid().
 delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
   case get_oldest_segid(Index) of
     false ->
