@@ -8,13 +8,14 @@ REBAR=$(shell ./rebar --version > /dev/null 2>&1 && echo "./rebar" || echo "reba
 deps:
 	$(REBAR) get-deps
 
-compile:
+compile: deps
 	$(REBAR) compile
 
-ut:
-	$(REBAR) eunit
+ut: deps
+	$(REBAR) skip_deps=true eunit
 
 ct: compile
 	$(REBAR) ct
 
 tests: ut ct
+
