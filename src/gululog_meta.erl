@@ -23,7 +23,6 @@
 %%%*_ MACROS and SPECS =========================================================
 
 -include("gululog_priv.hrl").
--include_lib("eunit/include/eunit.hrl").
 
 -record(meta, { logid       :: logid()
               , header_size :: bytecnt()
@@ -111,12 +110,17 @@ calculate_log_size(Version, #meta{ header_size = HeaderSize
 
 %%%*_ TESTS ====================================================================
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
 v1_size_test() ->
   Meta = new(1, 1, 0, 1),
   Bin = encode(1, Meta, <<>>, <<>>),
   ?assertEqual(Meta#meta{header_crc = 0, body_crc = 0}, decode(1, Bin)),
   Size = bytecnt(1),
   ?assertEqual(Size, size(Bin)).
+
+-endif.
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
