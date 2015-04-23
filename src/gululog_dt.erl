@@ -77,29 +77,21 @@ micro_to_now(MicroSec) ->
 -include_lib("eunit/include/eunit.hrl").
 
 gululog_dt_test_() ->
-  {setup,
-   fun() ->
-           ok
-   end,
-   fun(_) ->
-            [
-             {"micro_to_utc_str/1",
-              fun() ->
-                      Micro         = os_micro(),
-                      MicroStr      = micro_to_utc_str(Micro),
-                      MicroStrMicro = utc_str_to_micro(MicroStr),
-                      ?assertEqual(Micro, MicroStrMicro)
-              end},
-             {"sec_to_utc_str/1",
-              fun() ->
-                      Sec       = os_sec(),
-                      SecStr    = sec_to_utc_str(Sec),
-                      SecStrSec = utc_str_to_sec(SecStr),
-                      ?assertEqual(Sec, SecStrSec)
-              end}
-            ]
-   end
-  }.
+  [ {"micro_to_utc_str/1",
+      fun() ->
+         Micro         = os_micro(),
+         MicroStr      = micro_to_utc_str(Micro),
+         MicroStrMicro = utc_str_to_micro(MicroStr),
+         ?assertEqual(Micro, MicroStrMicro)
+       end}
+  , {"sec_to_utc_str/1",
+       fun() ->
+         Sec       = os_sec(),
+         SecStr    = sec_to_utc_str(Sec),
+         SecStrSec = utc_str_to_sec(SecStr),
+         ?assertEqual(Sec, SecStrSec)
+       end}
+  ].
 
 -endif.
 
