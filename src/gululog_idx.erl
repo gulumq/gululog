@@ -7,7 +7,7 @@
 
 %% APIs for writer (owner)
 -export([ init/1              %% Initialize log index from the given log file directory
-        , close/1             %% close the writer cursor
+        , flush_close/1       %% close the writer cursor
         , append/3            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
         , switch_append/4     %% switch then append
@@ -74,8 +74,8 @@ init(Dir) ->
       }.
 
 %% @doc Close write fd, delete ets cache table.
--spec close(index()) -> ok.
-close(#idx{fd = Fd, tid = Tid}) ->
+-spec flush_close(index()) -> ok.
+flush_close(#idx{fd = Fd, tid = Tid}) ->
   ok = file:sync(Fd),
   ok = file:close(Fd),
   true = ets:delete(Tid),
@@ -123,6 +123,7 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
 switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
   NewSegId = NextLogId,
   {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
+  ok = file:sync(Fd),
   ok = file:close(Fd),
   Idx#idx{segid = NewSegId, fd = NewFd}.
 

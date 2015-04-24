@@ -88,7 +88,7 @@ t_init_from_existing({init, Config}) ->
   ok = gululog_idx:append(Index0, 1, 10),
   Index1 = gululog_idx:switch_append(Dir, Index0, 2, 3),
   ok = gululog_idx:append(Index1, 3, 50),
-  ok = gululog_idx:close(Index1),
+  ok = gululog_idx:flush_close(Index1),
   Config;
 t_init_from_existing({'end', _Config}) ->
   ok;
