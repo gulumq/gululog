@@ -58,16 +58,21 @@ open(Dir, SegId) ->
 close(#rcur{fd = Fd}) -> file:close(Fd).
 
 %% @doc Read one log including head and body.
--spec read(cursor(), options()) -> {cursor(), log()}.
+-spec read(cursor(), options()) -> {cursor(), log()} | eof.
 read(#rcur{version = Version} = Cursor0, Options) ->
-  #rcur{meta = Meta} = Cursor1 = read_meta(Cursor0),
-  {Cursor2, Header} = read_header(Cursor1),
-  {Cursor,  Body} = maybe_read_body(Cursor2, Options),
-  ok = gululog_meta:assert_data_integrity(Version, Meta, Header, Body),
-  {Cursor, #gululog{ logid     = gululog_meta:logid(Meta)
-                   , header    = Header
-                   , body      = Body
-                   }}.
+  case read_meta(Cursor0) of
+    eof ->
+      eof;
+    #rcur{meta = Meta} = Cursor1 ->
+      {Cursor2, Header} = read_header(Cursor1),
+      {Cursor,  Body} = maybe_read_body(Cursor2, Options),
+      ok = gululog_meta:assert_data_integrity(Version, Meta, Header, Body),
+      Log = #gululog{ logid  = gululog_meta:logid(Meta)
+                    , header = Header
+                    , body   = Body
+                    },
+      {Cursor, Log}
+  end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
@@ -80,12 +85,16 @@ read_meta(#rcur{ version  = Version
                , position = Position
                } = Cursor0) ->
   Bytes = gululog_meta:bytecnt(Version),
-  {ok, MetaBin} = file:read(Fd, Bytes),
-  Meta = gululog_meta:decode(Version, MetaBin),
-  Cursor0#rcur{ ptr_at   = header
-              , meta     = Meta
-              , position = Position + Bytes
-              }.
+  case file:read(Fd, Bytes) of
+    {ok, MetaBin} ->
+      Meta = gululog_meta:decode(Version, MetaBin),
+      Cursor0#rcur{ ptr_at   = header
+                  , meta     = Meta
+                  , position = Position + Bytes
+                  };
+    eof ->
+      eof
+  end.
 
 %% @private Read log header.
 -spec read_header(cursor()) -> {cursor(), header()}.

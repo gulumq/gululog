@@ -15,6 +15,7 @@
 
 %% cases
 -export([ t_basic_flow/1
+        , t_open_exists/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -47,18 +48,53 @@ t_basic_flow({init, Config}) -> Config;
 t_basic_flow({'end', _Config}) -> ok;
 t_basic_flow(Config) ->
   Dir = ?config(dir),
-  W_Cursor0 = gululog_w_cur:open(Dir),
-  W_Cursor1 = gululog_w_cur:append(W_Cursor0, _LogId = 1, <<"header1">>, <<"body1">>),
-  W_Cursor2 = gululog_w_cur:append(W_Cursor1, _logId = 2, <<"header2">>, <<"body2">>),
-  ok = gululog_w_cur:close(W_Cursor2),
-  R_Cursor0 = gululog_r_cur:open(Dir, 0),
-  {R_Cursor1, Log1} = gululog_r_cur:read(R_Cursor0, _Options = []),
+  W_Cursor_ = gululog_w_cur:open(Dir),
+  W_Cursor0 = gululog_w_cur:append(W_Cursor_, 0, <<"header0">>, <<"body0">>),
+  W_Cursor1 = gululog_w_cur:append(W_Cursor0, 1, <<"header1">>, <<"body1">>),
+  ok = gululog_w_cur:flush_close(W_Cursor1),
+  R_Cursor_ = gululog_r_cur:open(Dir, 0),
+  {R_Cursor0, Log0} = gululog_r_cur:read(R_Cursor_, _Options = []),
+  ?assertMatch(#gululog{ header = <<"header0">>
+                       , body   = <<"body0">>}, Log0),
+  {R_Cursor1, Log1} = gululog_r_cur:read(R_Cursor0, [skip_body]),
   ?assertMatch(#gululog{ header = <<"header1">>
-                       , body   = <<"body1">>}, Log1),
-  {R_Cursor2, Log2} = gululog_r_cur:read(R_Cursor1, [skip_body]),
+                       , body   = undefined}, Log1),
+  ?assertEqual(eof, gululog_r_cur:read(R_Cursor1, [])),
+  ok = gululog_r_cur:close(R_Cursor1),
+  ok.
+
+t_open_exists({init, Config}) ->
+  Dir = ?config(dir),
+  W_Cursor_ = gululog_w_cur:open(Dir),
+  W_Cursor0 = gululog_w_cur:append(W_Cursor_, 0, <<"header0">>, <<"body0">>),
+  W_Cursor1 = gululog_w_cur:append(W_Cursor0, 1, <<"header1">>, <<"body1">>),
+  W_Cursor2 = gululog_w_cur:switch_append(Dir, W_Cursor1, 2, <<"header2">>, <<"body2">>),
+  ok = gululog_w_cur:flush_close(W_Cursor2),
+  Config;
+t_open_exists({'end', _Config}) -> ok;
+t_open_exists(Config) ->
+  Dir = ?config(dir),
+  W_Cursor2 = gululog_w_cur:open(Dir),
+  _ = gululog_w_cur:append(W_Cursor2, 3, <<"header3">>, <<"body3">>),
+
+  R_Cursor_ = gululog_r_cur:open(Dir, 0),
+  {R_Cursor0, Log0} = gululog_r_cur:read(R_Cursor_, []),
+  {R_Cursor1, Log1} = gululog_r_cur:read(R_Cursor0, [skip_body]),
+  ?assertMatch(#gululog{ header = <<"header0">>
+                       , body   = <<"body0">>}, Log0),
+  ?assertMatch(#gululog{ header = <<"header1">>
+                       , body   = undefined}, Log1),
+  ?assertEqual(eof, gululog_r_cur:read(R_Cursor1, [])),
+  ok = gululog_r_cur:close(R_Cursor1),
+
+  R_Cursor2_ = gululog_r_cur:open(Dir, 2),
+  {R_Cursor2, Log2} = gululog_r_cur:read(R_Cursor2_, []),
+  {R_Cursor3, Log3} = gululog_r_cur:read(R_Cursor2, []),
   ?assertMatch(#gululog{ header = <<"header2">>
-                       , body   = undefined}, Log2),
-  ok = gululog_r_cur:close(R_Cursor2),
+                       , body   = <<"body2">>}, Log2),
+  ?assertMatch(#gululog{ header = <<"header3">>
+                       , body   = <<"body3">>}, Log3),
+  ?assertEqual(eof, gululog_r_cur:read(R_Cursor3, [])),
   ok.
 
 %%%_* Emacs ====================================================================

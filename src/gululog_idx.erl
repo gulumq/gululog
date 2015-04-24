@@ -119,8 +119,9 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
   end.
 
 %% @doc Switch to a new log segment
--spec switch(dirname(), index(), segid()) -> index().
-switch(Dir, #idx{fd = Fd} = Idx, NewSegId) ->
+-spec switch(dirname(), index(), logid()) -> index().
+switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
+  NewSegId = NextLogId,
   {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
   ok = file:close(Fd),
   Idx#idx{segid = NewSegId, fd = NewFd}.
