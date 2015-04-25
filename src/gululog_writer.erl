@@ -26,6 +26,9 @@
 -type index() :: gululog_idx:index().
 -type w_cur() :: gululog_w_cur:cursor().
 
+-define(MINIMUM_SEG_MB, 100). %% mininum segment size in MB
+-define(DEFAULT_SEG_MB, ?MINIMUM_SEG_MB). %% default segment size in MB
+
 -define(RECORD_TO_PROPLIST(RECORD_NAME, THE_TUPLE),
         {RECORD_NAME,
          lists:zip(record_info(fields, RECORD_NAME),
@@ -34,13 +37,17 @@
 -define(FIELD_ERR(RECORD_NAME, FIELD_NAME),
         erlang:error({field_value_missing, RECORD_NAME, FIELD_NAME})).
 
+-define(ST_FIELD_ERR(FIELD_NAME), ?FIELD_ERR(state, FIELD_NAME)).
+
 -record(state,
-        { dir = ?FIELD_ERR(state, dir) :: dirname()
+        { dir   = ?ST_FIELD_ERR(dir)   :: dirname()        %% index / segment file location
+        , segMB = ?ST_FIELD_ERR(segMB) :: bytecnt()        %% segment file size limit in MB
         , index                        :: ?undef | index() %% index
         , w_cur                        :: ?undef | w_cur() %% writer causor
         }).
 
 %%%*_ API FUNCTIONS ============================================================
+
 start(Options) ->
   gen_server:start(?MODULE, Options, []).
 
@@ -51,10 +58,15 @@ stop(Pid) ->
   gen_server:cast(Pid, stop).
 
 %%%*_ gen_server CALLBACKS =====================================================
+
 init(Options) ->
   Dir = keyget(key, Options),
+  SegMB = case keyget(segMB, Options, ?DEFAULT_SEG_MB) of
+            MB when MB < ?MINIMUM_SEG_MB -> ?MINIMUM_SEG_MB;
+            MB                           -> MB
+          end,
   gen_server:cast(self(), post_init),
-  #state{dir = Dir}.
+  #state{dir = Dir, segMB = SegMB}.
 
 handle_cast(post_init, #state{} = State) ->
   NewState = do_init(State),
@@ -91,9 +103,19 @@ format_status(_Opt, [_PDict, State]) ->
 %%       4. open writer cursor
 do_init(State) -> State.
 
+%% @private Get value from key-value list, crash if not found.
+-spec keyget(Key::term(), [{Key::term(), Value::term()}]) -> Value::term().
 keyget(Key, KvList) ->
   {Key, Value} = lists:keyfind(Key, 1, KvList),
   Value.
+
+%% @private Get value from key-value list, return default if not found
+-spec keyget(Key::term(), [{Key::term(), Value::term()}], Default::term()) -> Value::term().
+keyget(Key, KvList, Default) ->
+  case lists:keyfind(Key, 1, KvList) of
+    {Key, Value} -> Value;
+    false        -> Default
+  end.
 
 -spec maybe_close_index(?undef | index()) -> ok.
 maybe_close_index(?undef) -> ok;
@@ -104,11 +126,14 @@ maybe_close_w_cur(?undef) -> ok;
 maybe_close_w_cur(W_cur)  -> gululog_idx:flush_close(W_cur).
 
 %%%*_ TESTS ====================================================================
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
 dir_missing_test() ->
-  ?assertException(error, {field_value_missing, state, dir}, #state{}).
+  ?assertException(error, {field_value_missing, state, dir}, #state{}),
+  ?assertException(error, {field_value_missing, state, segMB}, #state{dir = ""}),
+  ?assertMatch(#state{}, #state{dir = "", segMB = 100}).
 
 -endif.
 
