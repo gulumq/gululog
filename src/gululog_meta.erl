@@ -90,7 +90,7 @@ assert_data_integrity(1, #meta{ header_crc = HeaderCRC
                               , body_crc   = BodyCRC
                               }, Header, Body) ->
   [erlang:throw(corrupted_header) || HeaderCRC =/= erlang:crc32(Header)],
-  [erlang:throw(corrupted_body) || Body =/= undefined andalso BodyCRC=/= erlang:crc32(Body)],
+  [erlang:throw(corrupted_body) || Body =/= ?undef andalso BodyCRC=/= erlang:crc32(Body)],
   ok.
 
 %% @doc Per-version meta size in file.

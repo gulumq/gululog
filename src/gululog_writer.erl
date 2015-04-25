@@ -36,8 +36,8 @@
 
 -record(state,
         { dir = ?FIELD_ERR(state, dir) :: dirname()
-        , index                        :: undefined | index() %% index
-        , w_cur                        :: undefined | w_cur() %% writer causor
+        , index                        :: ?undef | index() %% index
+        , w_cur                        :: ?undef | w_cur() %% writer causor
         }).
 
 %%%*_ API FUNCTIONS ============================================================
@@ -73,7 +73,7 @@ handle_info(_Info, State) ->
 terminate(_Reason, #state{index = Index, w_cur = W_cur} = State) ->
   ok = maybe_close_index(Index),
   ok = maybe_close_w_cur(W_cur),
-  NewState = State#state{index = undefined, w_cur = unfefined},
+  NewState = State#state{index = ?undef, w_cur = unfefined},
   {ok, NewState}.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -95,11 +95,13 @@ keyget(Key, KvList) ->
   {Key, Value} = lists:keyfind(Key, 1, KvList),
   Value.
 
-maybe_close_index(undefined) -> ok;
-maybe_close_index(Index)     -> gululog_idx:flush_close(Index).
+-spec maybe_close_index(?undef | index()) -> ok.
+maybe_close_index(?undef) -> ok;
+maybe_close_index(Index)  -> gululog_idx:flush_close(Index).
 
-maybe_close_w_cur(undefined) -> ok;
-maybe_close_w_cur(W_cur)     -> gululog_idx:flush_close(W_cur).
+-spec maybe_close_w_cur(?undef | w_cur()) -> ok.
+maybe_close_w_cur(?undef) -> ok;
+maybe_close_w_cur(W_cur)  -> gululog_idx:flush_close(W_cur).
 
 %%%*_ TESTS ====================================================================
 -ifdef(TEST).

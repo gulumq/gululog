@@ -21,6 +21,7 @@
 -define(LOGVSN, 1). %% Current version
 -define(DOT_IDX, ".idx").
 -define(DOT_SEG, ".seg").
+-define(undef, undefined).
 
 -endif.
 

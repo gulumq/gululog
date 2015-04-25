@@ -22,7 +22,7 @@
 -record(rcur, { version  :: logvsn()
               , segid    :: segid()
               , fd       :: file:fd()
-              , meta     :: undefined | meta()
+              , meta     :: ?undef | meta()
               , ptr_at   :: meta | header | body %% pointer at
               , position :: position()
               }).
@@ -44,7 +44,7 @@ open(Dir, SegId) ->
       #rcur{ version  = VSN
            , segid    = SegId
            , fd       = Fd
-           , meta     = undefined
+           , meta     = ?undef
            , ptr_at   = meta
            , position = 1
            }
@@ -81,7 +81,7 @@ read(#rcur{version = Version} = Cursor0, Options) ->
 read_meta(#rcur{ version  = Version
                , fd       = Fd
                , ptr_at   = meta
-               , meta     = undefined
+               , meta     = ?undef
                , position = Position
                } = Cursor0) ->
   Bytes = gululog_meta:bytecnt(Version),
@@ -115,7 +115,7 @@ read_header(#rcur{ fd       = Fd
 %% the fd is positioned to the beginning of the next log
 %% @end
 -spec maybe_read_body(cursor(), options()) ->
-        {cursor(), undefined | body()} | no_return().
+        {cursor(), ?undef | body()} | no_return().
 maybe_read_body(#rcur{ fd       = Fd
                      , ptr_at   = body
                      , meta     = Meta
@@ -126,13 +126,13 @@ maybe_read_body(#rcur{ fd       = Fd
     case proplists:get_bool(skip_body, Options) of
       true ->
         {ok, _} = file:position(Fd, Position + Bytes),
-        undefined;
+        ?undef;
       false ->
         {ok, Body_} = file:read(Fd, Bytes),
         Body_
     end,
   Cursor = Cursor0#rcur{ ptr_at   = meta
-                       , meta     = undefined
+                       , meta     = ?undef
                        , position = Position + Bytes
                        },
   {Cursor, Body}.
