@@ -5,6 +5,7 @@
 -export([ open/2
         , read/2
         , close/1
+        , reposition/2
         ]).
 
 -export_type([cursor/0]).
@@ -32,7 +33,7 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Open segment file in 'raw' mode for a reader.
--spec open(dirname(), segid()) -> empty | {ok, cursor()} | no_return().
+-spec open(dirname(), segid()) -> empty | cursor() | no_return().
 open(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
@@ -72,6 +73,19 @@ read(#rcur{version = Version} = Cursor0, Options) ->
                     , body   = Body
                     },
       {Cursor, Log}
+  end.
+
+%% @doc Reposition the cursor position.
+-spec reposition(cursor(), position()) -> cursor().
+reposition(#rcur{fd = Fd} = Cur, Position) ->
+  case file:position(Fd, Position) of
+    {ok, Position} ->
+      Cur#rcur{ meta     = ?undef
+              , ptr_at   = meta
+              , position = Position
+              };
+    Other ->
+      erlang:throw({bad_position, Other})
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================

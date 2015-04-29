@@ -1,3 +1,4 @@
+%% @doc The log (topic) writer (owner) API module.
 
 -module(gululog_writer).
 
@@ -26,8 +27,7 @@
 -type index() :: gululog_idx:index().
 -type w_cur() :: gululog_w_cur:cursor().
 
--define(MINIMUM_SEG_MB, 100). %% mininum segment size in MB
--define(DEFAULT_SEG_MB, ?MINIMUM_SEG_MB). %% default segment size in MB
+-define(DEFAULT_SEG_MB, 100). %% default segment size in MB
 
 -define(RECORD_TO_PROPLIST(RECORD_NAME, THE_TUPLE),
         {RECORD_NAME,
@@ -61,10 +61,7 @@ stop(Pid) ->
 
 init(Options) ->
   Dir = keyget(key, Options),
-  SegMB = case keyget(segMB, Options, ?DEFAULT_SEG_MB) of
-            MB when MB < ?MINIMUM_SEG_MB -> ?MINIMUM_SEG_MB;
-            MB                           -> MB
-          end,
+  SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
   gen_server:cast(self(), post_init),
   #state{dir = Dir, segMB = SegMB}.
 
