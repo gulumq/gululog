@@ -176,7 +176,7 @@ move_file(Source, TargetDir, Suffix) ->
 %% @private Copy .idx or .seg file to the given directory.
 -spec copy_file(filename(), dirname(), string()) -> ok.
 copy_file(Source, TargetDir, Suffix) ->
-  SegId = gululog_name:to_seg_id(Source),
+  SegId = gululog_name:to_segid(Source),
   TargetFile = gululog_name:from_segid(TargetDir, SegId) ++ Suffix,
   ok = filelib:ensure_dir(TargetFile),
   {ok, _} = file:copy(Source, TargetFile),
@@ -196,7 +196,8 @@ truncate_seg_file(SegFile, Position, BackupDir) ->
 -spec truncate_file(filename(), position(), dirname(), string()) -> ok.
 truncate_file(FileName, Position, BackupDir, Suffix) ->
   ok = copy_file(FileName, BackupDir, Suffix),
-  {ok, Fd} = file:oepn(FileName, [write, raw, binary]),
+  %% open with 'read' mode, otherwise truncate does not work
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   try
     {ok, Position} = file:position(Fd, Position),
     ok = file:truncate(Fd)
@@ -210,6 +211,71 @@ time_now_str() ->
   gululog_dt:sec_to_utc_str_compact(gululog_dt:os_sec()).
 
 %%%*_ TESTS ====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+move_test_() ->
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "move-test"),
+  _ = file:del_dir(Dir),
+  ok = filelib:ensure_dir(filename:join(Dir, "foo")),
+  FileBaseName = gululog_name:from_segid(Dir, 1),
+  BackupDir = filename:join(Dir, "backup"),
+  BackupFileBaseName = gululog_name:from_segid(BackupDir, 1),
+  IdxFile = FileBaseName ++ ?DOT_IDX,
+  SegFile = FileBaseName ++ ?DOT_SEG,
+  BackupIdxFile = BackupFileBaseName ++ ?DOT_IDX,
+  BackupSegFile = BackupFileBaseName ++ ?DOT_SEG,
+  ok = file:write_file(IdxFile, <<"idx">>, [binary]),
+  ok = file:write_file(SegFile, <<"seg">>, [binary]),
+  [ { "move idx file"
+    , fun() ->
+        ok = move_idx_file(IdxFile, BackupDir),
+        ?assertEqual({ok, <<"idx">>}, file:read_file(BackupIdxFile)),
+        ?assertEqual(false, filelib:is_file(IdxFile))
+      end
+    }
+  , { "move seg file"
+    , fun() ->
+        ok = move_seg_file(SegFile, BackupDir),
+        ?assertEqual({ok, <<"seg">>}, file:read_file(BackupSegFile)),
+        ?assertEqual(false, filelib:is_file(SegFile))
+      end
+    }
+  ].
+
+truncate_test_() ->
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "truncate-test"),
+  _ = file:del_dir(Dir),
+  ok = filelib:ensure_dir(filename:join(Dir, "foo")),
+  FileBaseName = gululog_name:from_segid(Dir, 1),
+  BackupDir = filename:join(Dir, "backup"),
+  BackupFileBaseName = gululog_name:from_segid(BackupDir, 1),
+  IdxFile = FileBaseName ++ ?DOT_IDX,
+  SegFile = FileBaseName ++ ?DOT_SEG,
+  BackupIdxFile = BackupFileBaseName ++ ?DOT_IDX,
+  BackupSegFile = BackupFileBaseName ++ ?DOT_SEG,
+  ok = file:write_file(IdxFile, <<"0123456789">>, [binary]),
+  ok = file:write_file(SegFile, <<"0123456789">>, [binary]),
+  [ { "truncate idx file"
+    , fun() ->
+        ok = truncate_idx_file(IdxFile, 1, BackupDir),
+        ?assertEqual({ok, <<"0">>},          file:read_file(IdxFile)),
+        ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupIdxFile))
+      end
+    }
+  , { "truncate seg file"
+    , fun() ->
+        ok = truncate_seg_file(SegFile, 10, BackupDir),
+        ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile)),
+        ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupSegFile))
+      end
+    }
+  ].
+
+-endif.
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

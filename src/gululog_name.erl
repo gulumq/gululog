@@ -22,7 +22,7 @@ from_segid(DirName, SegId) when is_integer(SegId) ->
 %% @doc Convert filename back to segment ID.
 -spec to_segid(filename()) -> segid().
 to_segid(FileName) when is_list(FileName) ->
-  [Basename | _] = string:tokens(filename:basename(FileName), "."),
+  [Basename | _Suffix] = string:tokens(filename:basename(FileName), "."),
   list_to_integer(Basename).
 
 %% @doc Wildcard match in the given directory, retrun the full
