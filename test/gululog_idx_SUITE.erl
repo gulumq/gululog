@@ -23,7 +23,7 @@
 suite() -> [{timetrap, {seconds,30}}].
 
 init_per_suite(Config) ->
-  Dir = filename:join([".", "test_data"]),
+  Dir = filename:join([".", "idx-suite"]),
   [{dir, Dir} | Config].
 
 end_per_suite(_Config) -> ok.

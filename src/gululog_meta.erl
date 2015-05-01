@@ -12,7 +12,6 @@
         , logid/1
         , header_size/1
         , body_size/1
-        , now_ts/0
         , new/4
         , assert_data_integrity/4
         ]).
@@ -33,9 +32,6 @@
 
 -opaque meta() :: #meta{}.
 -type ts() :: os_sec().
-
--spec now_ts() -> ts().
-now_ts() -> gululog_dt:os_sec().
 
 -spec logid(meta()) -> logid().
 logid(#meta{logid = LogId}) -> LogId.
