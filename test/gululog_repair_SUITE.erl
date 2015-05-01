@@ -14,6 +14,8 @@
 
 %% cases
 -export([ t_nothing_to_repair/1
+        , t_backup_seg/1
+        , t_backup_idx/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -44,9 +46,50 @@ all() -> [F || {F, _A} <- module_info(exports),
 %% @doc Test a basic reader & writer cursor work flow.
 t_nothing_to_repair({init, Config}) -> Config;
 t_nothing_to_repair({'end', _Config}) -> ok;
-t_nothing_to_repair(Config) ->
+t_nothing_to_repair(Config) when is_list(Config) ->
   Dir = ?config(dir),
   ?assertEqual({ok, []}, gululog_repair:repair_dir(Dir)).
+
+
+%% @doc No index file paired with a segment file.
+t_backup_seg({init, Config}) ->
+  Dir = ?config(dir),
+  %% add a new segment file but no index file
+  Cur = gululog_w_cur:open(Dir),
+  ok = gululog_w_cur:flush_close(Cur),
+  Config;
+t_backup_seg({'end', _Config}) -> ok;
+t_backup_seg(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  BackupDir = filename:join(Dir, "backup"),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  SegFile = gululog_name:from_segid(Dir, 0) ++ ?DOT_SEG,
+  ?assertEqual([{?REPAIR_BACKEDUP, SegFile}], RepairedFiles),
+  BackupFile = gululog_name:from_segid(BackupDir, 0) ++ ?DOT_SEG,
+  ?assertEqual(true, filelib:is_file(BackupFile)).
+
+t_backup_idx({init, Config}) ->
+  Dir = ?config(dir),
+  %% create some files
+  Topic0 = gululog_topic:init(Dir, [{segMB, 1}]),
+  Topic1 = gululog_topic:append(Topic0, <<"header">>, <<"body">>),
+  ok = gululog_topic:close(Topic1),
+  %% add a new segment file but no index file
+  Idx0 = gululog_idx:init(Dir),
+  Idx = gululog_idx:switch(Dir, Idx0, 1),
+  ok = gululog_idx:flush_close(Idx),
+  Config;
+t_backup_idx({'end', _Config}) -> ok;
+t_backup_idx(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  BackupDir = filename:join(Dir, "backup"),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  IdxFile = gululog_name:from_segid(Dir, 1) ++ ?DOT_IDX,
+  ?assertEqual([{?REPAIR_BACKEDUP, IdxFile}], RepairedFiles),
+  BackupFile = gululog_name:from_segid(BackupDir, 1) ++ ?DOT_IDX,
+  ?assertEqual(true, filelib:is_file(BackupFile)).
+
+%%%*_ PRIVATE FUNCTIONS ========================================================
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

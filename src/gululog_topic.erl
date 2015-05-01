@@ -4,6 +4,7 @@
 
 -export([ init/2
         , append/3
+        , close/1
         ]).
 
 -export_type([topic/0]).
@@ -59,6 +60,10 @@ init(Dir, Options) ->
         , logid = NextLogId
         }.
 
+%% @doc Append a new log entry to the given topic.
+%% Index and segments are switched to new files in case the segment file has
+%% hit the size limit.
+%% @end
 -spec append(topic(), header(), body()) -> topic().
 append(#topic{ dir   = Dir
              , idx   = Idx
@@ -67,6 +72,8 @@ append(#topic{ dir   = Dir
              , logid = LogId
              } = Topic, Header, Body) ->
   Position = gululog_w_cur:next_log_position(Cur),
+  %% NB! Swith before (but NOT after) appending.
+  %% this is to minimize the chance of requiring a repair at restart.
   case Position >= SegMB * ?MEGA of
     true ->
       NewCur = gululog_w_cur:switch(Dir, Cur, LogId),
@@ -80,6 +87,12 @@ append(#topic{ dir   = Dir
                  , logid = LogId + 1
                  }
   end.
+
+%% @doc Close index and segment writer cursor.
+-spec close(topic()) -> ok.
+close(#topic{idx = Idx, cur = Cur}) ->
+  ok = gululog_w_cur:flush_close(Cur),
+  ok = gululog_idx:flush_close(Idx).
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 

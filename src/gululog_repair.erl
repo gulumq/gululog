@@ -40,9 +40,9 @@ repair_dir(Dir, BackupDir) ->
       {ok, BackedupFiles} = repair_dir(IdxFiles, SegFiles, BackupDir, []),
       {ok, RepairedFiles} = repair_seg(IdxFiles -- BackedupFiles,
                                        SegFiles -- BackedupFiles, Dir, BackupDir),
-      {ok, BackedupFiles ++ RepairedFiles};
+      {ok, [{?REPAIR_BACKEDUP, F} || F <- BackedupFiles] ++ RepairedFiles};
     false ->
-      %% non-exist dir, do nothing
+      %% nonexist dir, do nothing
       {ok, []}
   end.
 
@@ -50,7 +50,7 @@ repair_dir(Dir, BackupDir) ->
 
 %% @private Repair log integrity in the given dir.
 -spec repair_dir([filename()], [filename()], dirname(), [filename()]) ->
-        {ok, [{tag(), filename()}]} | no_return().
+        {ok, [filename()]} | no_return().
 repair_dir([], [], _BackupDir, BackedupFiles) ->
   {ok, BackedupFiles};
 repair_dir([IdxFile | IdxFiles], [], BackupDir, BackedupFiles) ->
@@ -138,7 +138,7 @@ integral_pos(SegId, _IndexCache, LogId, RCursor) when LogId < SegId ->
   bof;
 integral_pos(SegId, IndexCache, LogId, RCursor0) ->
   {SegId, Pos} = gululog_idx:locate_in_cache(IndexCache, LogId),
-  RCursor1 = gululog_r_cur:re_position(RCursor0, Pos),
+  RCursor1 = gululog_r_cur:reposition(RCursor0, Pos),
   case try_read_log(RCursor1) of
     {ok, RCursor2} ->
       %% no corruption, return current logid being scaned

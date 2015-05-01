@@ -14,9 +14,14 @@
 cleanup(Dir) ->
   Files = filelib:wildcard("*" ++ ?DOT_SEG, Dir) ++
           filelib:wildcard("*" ++ ?DOT_IDX, Dir),
-  lists:foreach(fun(File) ->
-                  ok = file:delete(filename:join(Dir, File))
-                end, Files).
+  BackupDirs = filelib:wildcard("backup-*", Dir),
+  ok = lists:foreach(fun(File) ->
+                        ok = file:delete(filename:join(Dir, File))
+                     end, Files),
+  ok = lists:foreach(fun(BackupDir) ->
+                        ok = file:del_dir(filename:join(Dir, BackupDir))
+                     end, BackupDirs).
+
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
