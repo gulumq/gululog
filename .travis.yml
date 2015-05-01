@@ -5,4 +5,4 @@ otp_release:
   - 17.4
   - R16B03-1
   - R15B03
-script: "make tests"
+script: "make ct"

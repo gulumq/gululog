@@ -146,6 +146,9 @@ integral_pos(SegId, IndexCache, LogId, RCursor0) ->
       integral_pos(SegId, IndexCache, LogId - 1, RCursor1)
   end.
 
+%% @private Try read a log entry from reader cursor.
+%% return new cursor if succeeded, otherwise error with reason.
+%% @end
 -spec try_read_log(r_cursor()) -> {ok, r_cursor()} | {error, Reason}
         when Reason :: not_found
                      | corrupted_header
