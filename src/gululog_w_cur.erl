@@ -7,12 +7,13 @@
 
 -module(gululog_w_cur).
 
--export([open/1]).
--export([append/4]).
--export([flush_close/1]).
--export([version/1]).
--export([switch/3]).
--export([switch_append/5]).
+-export([ open/1
+        , append/4
+        , flush_close/1
+        , switch/3
+        , switch_append/5
+        , next_log_position/1
+        ]).
 
 -export_type([cursor/0]).
 
@@ -32,8 +33,9 @@
 
 %%%*_ API FUNCTIONS ============================================================
 
--spec version(cursor()) -> logvsn().
-version(#wcur{version = Version}) -> Version.
+%% @doc Get the position (byte offset) in segment file for the next log to be appended.
+-spec next_log_position(cursor()) -> position().
+next_log_position(#wcur{position = Position}) -> Position.
 
 %% @doc Open the last segment file the given directory for writer to append.
 %% @end

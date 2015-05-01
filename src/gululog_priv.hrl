@@ -23,5 +23,10 @@
 -define(DOT_SEG, ".seg").
 -define(undef, undefined).
 
+-define(REPAIR_BACKEDUP, backedup).
+-define(REPAIR_RESECTED, resected).
+
+-type repair_tag() :: ?REPAIR_BACKEDUP | ?REPAIR_RESECTED.
+
 -endif.
 

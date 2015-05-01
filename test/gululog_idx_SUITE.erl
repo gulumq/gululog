@@ -48,9 +48,9 @@ t_basic_flow(Config) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
   ?assertEqual(false, gululog_idx:get_latest_logid(Index0)),
-  ok = gululog_idx:append(Index0, 0, 1),
-  ok = gululog_idx:append(Index0, 1, 10),
-  ok = gululog_idx:append(Index0, 2, 40),
+  Index0 = gululog_idx:append(Index0, 0, 1),
+  Index0 = gululog_idx:append(Index0, 1, 10),
+  Index0 = gululog_idx:append(Index0, 2, 40),
   Index3 = gululog_idx:switch_append(Dir, Index0, 3, 1),
   Index4 = gululog_idx:switch_append(Dir, Index3, 4, 1),
   Index  = gululog_idx:switch(Dir, Index4, _NexLogId = 5),
@@ -84,10 +84,10 @@ t_basic_flow(Config) ->
 t_init_from_existing({init, Config}) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
-  ok = gululog_idx:append(Index0, 0, 1),
-  ok = gululog_idx:append(Index0, 1, 10),
+  Index0 = gululog_idx:append(Index0, 0, 1),
+  Index0 = gululog_idx:append(Index0, 1, 10),
   Index1 = gululog_idx:switch_append(Dir, Index0, 2, 3),
-  ok = gululog_idx:append(Index1, 3, 50),
+  Index1 = gululog_idx:append(Index1, 3, 50),
   ok = gululog_idx:flush_close(Index1),
   Config;
 t_init_from_existing({'end', _Config}) ->
@@ -103,7 +103,7 @@ t_init_from_existing(Config) ->
             , {4, {4, 1}}
             ],
   Index = gululog_idx:switch(Dir, Index0, _NextLogId = 4),
-  ok = gululog_idx:append(Index, 4, 1),
+  Index = gululog_idx:append(Index, 4, 1),
   lists:foreach(fun({LogId, ExpectedLocation}) ->
                   Location = gululog_idx:locate(Dir, Index, LogId),
                   ?assertEqual(ExpectedLocation, Location)

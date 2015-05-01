@@ -99,15 +99,15 @@ flush_close(#idx{fd = Fd, tid = Tid}) ->
 %% 2. LogId should be monotonic. i.e. NewLogId >= LatestLogId + 1
 %% 3. Position should be (at least MIN_LOG_SIZE) greater than the latest position
 %% @end
--spec append(index(), logid(), position()) -> ok | no_return().
+-spec append(index(), logid(), position()) -> index() | no_return().
 append(#idx{ version = ?LOGVSN
            , segid   = SegId
            , fd      = Fd
            , tid     = Tid
-           }, LogId, Position) ->
+           } = Idx, LogId, Position) ->
   ok = file:write(Fd, ?TO_FILE_ENTRY(SegId, LogId, Position)),
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
-  ok.
+  Idx.
 
 %% @doc Delete oldest segment from index
 %% return the segid that is deleted, return 'false' in case:
@@ -142,8 +142,7 @@ switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
 -spec switch_append(dirname(), index(), logid(), position()) -> index().
 switch_append(Dir, Idx, LogId, Position) ->
   NewIdx = switch(Dir, Idx, LogId),
-  ok = append(NewIdx, LogId, Position),
-  NewIdx.
+  append(NewIdx, LogId, Position).
 
 %% @doc Locate {SegId, Position} for a given LogId
 %% return {segid(), position()} if the given LogId is found

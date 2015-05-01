@@ -46,7 +46,7 @@ t_nothing_to_repair({init, Config}) -> Config;
 t_nothing_to_repair({'end', _Config}) -> ok;
 t_nothing_to_repair(Config) ->
   Dir = ?config(dir),
-  ?assertEqual({ok, {[], []}}, gululog_repair:repair_dir(Dir)).
+  ?assertEqual({ok, []}, gululog_repair:repair_dir(Dir)).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
