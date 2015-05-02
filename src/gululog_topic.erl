@@ -5,6 +5,7 @@
 -export([ init/2
         , append/3
         , close/1
+        , force_switch/1
         ]).
 
 -export_type([topic/0]).
@@ -93,6 +94,19 @@ append(#topic{ dir   = Dir
 close(#topic{idx = Idx, cur = Cur}) ->
   ok = gululog_w_cur:flush_close(Cur),
   ok = gululog_idx:flush_close(Idx).
+
+%% @doc Force switching to a new segment.
+-spec force_switch(topic()) -> topic().
+force_switch(#topic{ dir   = Dir
+                   , idx   = Idx
+                   , cur   = Cur
+                   , logid = LogId
+                   } = Topic) ->
+  NewCur = gululog_w_cur:switch(Dir, Cur, LogId),
+  NewIdx = gululog_idx:switch(Dir, Idx, LogId),
+  Topic#topic{ idx = NewIdx
+             , cur = NewCur
+             }.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 

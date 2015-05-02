@@ -16,6 +16,7 @@
 %% cases
 -export([ t_basic_flow/1
         , t_init_from_existing/1
+        , t_scan_file_to_locate/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -23,7 +24,8 @@
 suite() -> [{timetrap, {seconds,30}}].
 
 init_per_suite(Config) ->
-  Dir = filename:join([".", "idx-suite"]),
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "idx-suite"),
   [{dir, Dir} | Config].
 
 end_per_suite(_Config) -> ok.
@@ -44,7 +46,7 @@ all() -> [F || {F, _A} <- module_info(exports),
 %% @doc Test a basic indexing work flow.
 t_basic_flow({init, Config}) -> Config;
 t_basic_flow({'end', _Config}) -> ok;
-t_basic_flow(Config) ->
+t_basic_flow(Config) when is_list(Config) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
   ?assertEqual(false, gululog_idx:get_latest_logid(Index0)),
@@ -90,9 +92,8 @@ t_init_from_existing({init, Config}) ->
   Index1 = gululog_idx:append(Index1, 3, 50),
   ok = gululog_idx:flush_close(Index1),
   Config;
-t_init_from_existing({'end', _Config}) ->
-  ok;
-t_init_from_existing(Config) ->
+t_init_from_existing({'end', _Config}) -> ok;
+t_init_from_existing(Config) when is_list(Config) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
   ?assertEqual(3, gululog_idx:get_latest_logid(Index0)),
@@ -111,3 +112,34 @@ t_init_from_existing(Config) ->
   ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
   ok.
 
+%% @doc Delete log entry from index cache, scan idx file to locate.
+t_scan_file_to_locate({init, Config}) ->
+  Dir = ?config(dir),
+  Idx0 = gululog_idx:init(Dir),
+  Idx1 = gululog_idx:append(Idx0, 0, 1),
+  Idx2 = gululog_idx:append(Idx1, 1, 10),
+  Idx3 = gululog_idx:append(Idx2, 2, 20),
+  Idx4 = gululog_idx:append(Idx3, 3, 32),
+  ok = gululog_idx:flush_close(Idx4),
+  Config;
+t_scan_file_to_locate({'end', _Config}) -> ok;
+t_scan_file_to_locate(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  Idx0 = gululog_idx:init(Dir),
+  ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
+  ?assertEqual({0, 10}, gululog_idx:locate(Dir, Idx0, 1)),
+  Idx1 = gululog_idx:delete_from_cache(Idx0, 0),
+  Idx1 = gululog_idx:delete_from_cache(Idx0, 1), %% assert no change
+  Idx1 = gululog_idx:delete_from_cache(Idx0, 1), %% delete twice assert no change
+  ?assertEqual({0, 10}, gululog_idx:locate(Dir, Idx1, 1)),
+  ?assertEqual({0, 32}, gululog_idx:locate(Dir, Idx1, 3)),
+  Idx2 = gululog_idx:delete_from_cache(Idx1, 3),
+  ?assertEqual({0, 32}, gululog_idx:locate(Dir, Idx2, 3)),
+  ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
+  ok.
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:

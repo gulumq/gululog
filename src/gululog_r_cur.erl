@@ -83,15 +83,11 @@ read(#rcur{version = Version} = Cursor0, Options) ->
 %% @doc Reposition the cursor position.
 -spec reposition(cursor(), position()) -> cursor().
 reposition(#rcur{fd = Fd} = Cur, Position) ->
-  case file:position(Fd, Position) of
-    {ok, Position} ->
-      Cur#rcur{ meta     = ?undef
-              , ptr_at   = meta
-              , position = Position
-              };
-    Other ->
-      erlang:throw({bad_position, Other})
-  end.
+  {ok, Position} = file:position(Fd, Position),
+  Cur#rcur{ meta     = ?undef
+          , ptr_at   = meta
+          , position = Position
+          }.
 
 %% @doc Get current fd pointer position.
 -spec current_position(cursor()) -> position().
@@ -166,14 +162,24 @@ maybe_read_body(#rcur{ fd       = Fd
 -spec read_version(file:fd()) -> empty | logvsn() | no_return().
 read_version(Fd) ->
   case file:read(Fd, 1) of
-    eof                      -> empty;
-    {ok, <<Version:8>>}      -> Version;
-    {error, Reason}          -> erlang:error(Reason)
+    eof                                         -> empty;
+    {ok, <<Version:8>>} when Version =< ?LOGVSN -> Version
   end.
 
 mk_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).
 
 %%%*_ TESTS ====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+open_fail_test() ->
+  {ok, Cwd} = file:get_cwd(),
+  SegFile = gululog_name:mk_seg_name(Cwd, 999),
+  ok = file:write_file(SegFile, <<255>>),
+  ?assertException(error, {case_clause, _}, open(Cwd, 999)).
+
+-endif.
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
