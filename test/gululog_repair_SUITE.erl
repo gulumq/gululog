@@ -22,6 +22,7 @@
         , t_resect_seg_ahead/1
         , t_empty_seg_file/1
         , t_empty_idx_file/1
+        , t_empty_idx_and_seg_file/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -274,6 +275,40 @@ t_empty_idx_file({init, Config}) ->
   Config;
 t_empty_idx_file({'end', _Config}) -> ok;
 t_empty_idx_file(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  BackupDir = ?config(backup_dir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  Idx0File = gululog_name:mk_idx_name(Dir, 0),
+  Idx1File = gululog_name:mk_idx_name(Dir, 1),
+  Seg0File = gululog_name:mk_seg_name(Dir, 0),
+  Seg1File = gululog_name:mk_seg_name(Dir, 1),
+  ?assertEqual([{?REPAIR_BACKEDUP, Idx1File},
+                {?REPAIR_BACKEDUP, Seg1File}], RepairedFiles),
+  Idx1BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
+  Seg1BackupFile = gululog_name:mk_seg_name(BackupDir, 1),
+  %% assert segment 0 files are still there
+  ?assertEqual(true, filelib:is_file(Idx0File)),
+  ?assertEqual(true, filelib:is_file(Seg0File)),
+  %% assert segment 1 files are removed
+  ?assertEqual(false, filelib:is_file(Idx1File)),
+  ?assertEqual(false, filelib:is_file(Seg1File)),
+  %% assert segment 1 files are backedup
+  ?assertEqual(true, filelib:is_file(Idx1BackupFile)),
+  ?assertEqual(true, filelib:is_file(Seg1BackupFile)),
+  ok.
+
+%% @doc Both the latest idx and seg file have only a version byte written.
+t_empty_idx_and_seg_file({init, Config}) ->
+  Dir = ?config(dir),
+  %% write a log
+  Topic0 = gululog_topic:init(Dir, [{segMB, 1}]),
+  Topic1 = gululog_topic:append(Topic0, <<"header0">>, <<"body0">>),
+  Topic2 = gululog_topic:force_switch(Topic1),
+  Topic3 = gululog_topic:force_switch(Topic2), %% switch twice should be fine
+  ok = gululog_topic:close(Topic3),
+  Config;
+t_empty_idx_and_seg_file({'end', _Config}) -> ok;
+t_empty_idx_and_seg_file(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
