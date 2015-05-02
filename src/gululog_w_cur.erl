@@ -7,12 +7,13 @@
 
 -module(gululog_w_cur).
 
--export([open/1]).
--export([append/4]).
--export([flush_close/1]).
--export([version/1]).
--export([switch/3]).
--export([switch_append/5]).
+-export([ open/1
+        , append/4
+        , flush_close/1
+        , switch/3
+        , switch_append/5
+        , next_log_position/1
+        ]).
 
 -export_type([cursor/0]).
 
@@ -32,8 +33,9 @@
 
 %%%*_ API FUNCTIONS ============================================================
 
--spec version(cursor()) -> logvsn().
-version(#wcur{version = Version}) -> Version.
+%% @doc Get the position (byte offset) in segment file for the next log to be appended.
+-spec next_log_position(cursor()) -> position().
+next_log_position(#wcur{position = Position}) -> Position.
 
 %% @doc Open the last segment file the given directory for writer to append.
 %% @end
@@ -44,7 +46,7 @@ open(Dir) ->
     [] ->
       open_new_seg(Dir, 0);
     [LatestSegFile | _] ->
-      SegId = gululog_name:to_segid(LatestSegFile),
+      SegId = gululog_name:filename_to_segid(LatestSegFile),
       {ok, Fd} = file:open(LatestSegFile, [write, read, raw, binary]),
       {ok, <<Version:8>>} = file:read(Fd, 1),
       true = (Version =< ?LOGVSN), %% assert
@@ -114,15 +116,13 @@ open_new_seg(Dir, SegId) ->
        }.
 
 %% @private Make a segment file name.
-mk_name(Dir, SegId) ->
-  gululog_name:from_segid(Dir, SegId) ++ ?DOT_SEG.
+mk_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).
 
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
-wildcard_reverse(Dir) ->
-    gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_SEG).
+wildcard_reverse(Dir) -> gululog_name:wildcard_seg_name_reversed(Dir).
 
 %%%*_ TESTS ====================================================================
 

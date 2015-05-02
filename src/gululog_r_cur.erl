@@ -3,8 +3,11 @@
 -module(gululog_r_cur).
 
 -export([ open/2
+        , read/1
         , read/2
         , close/1
+        , current_position/1
+        , reposition/2
         ]).
 
 -export_type([cursor/0]).
@@ -32,7 +35,7 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Open segment file in 'raw' mode for a reader.
--spec open(dirname(), segid()) -> empty | {ok, cursor()} | no_return().
+-spec open(dirname(), segid()) -> empty | cursor() | no_return().
 open(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
@@ -58,6 +61,9 @@ open(Dir, SegId) ->
 close(#rcur{fd = Fd}) -> file:close(Fd).
 
 %% @doc Read one log including head and body.
+read(Cur) -> read(Cur, []).
+
+%% @doc Read one log including head and maybe body.
 -spec read(cursor(), options()) -> {cursor(), log()} | eof.
 read(#rcur{version = Version} = Cursor0, Options) ->
   case read_meta(Cursor0) of
@@ -73,6 +79,23 @@ read(#rcur{version = Version} = Cursor0, Options) ->
                     },
       {Cursor, Log}
   end.
+
+%% @doc Reposition the cursor position.
+-spec reposition(cursor(), position()) -> cursor().
+reposition(#rcur{fd = Fd} = Cur, Position) ->
+  case file:position(Fd, Position) of
+    {ok, Position} ->
+      Cur#rcur{ meta     = ?undef
+              , ptr_at   = meta
+              , position = Position
+              };
+    Other ->
+      erlang:throw({bad_position, Other})
+  end.
+
+%% @doc Get current fd pointer position.
+-spec current_position(cursor()) -> position().
+current_position(#rcur{position = Position}) -> Position.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
@@ -148,8 +171,7 @@ read_version(Fd) ->
     {error, Reason}          -> erlang:error(Reason)
   end.
 
-mk_name(Dir, SegId) ->
-  gululog_name:from_segid(Dir, SegId) ++ ?DOT_SEG.
+mk_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).
 
 %%%*_ TESTS ====================================================================
 

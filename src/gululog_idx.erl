@@ -15,21 +15,31 @@
         ]).
 
 %% APIs for readers (public access)
--export([ locate/3         %% Locate {SegId, Position} for a given LogId
-        , get_latest_logid/1 %% latest logid in ets
+-export([ locate/3            %% Locate {SegId, Position} for a given LogId
+        , get_latest_logid/1  %% latest logid in ets
+        , init_cache/1
+        , close_cache/1
+        , locate_in_cache/2
         ]).
 
--export_type([index/0]).
+%% APIs for repair
+-export([get_next_position_in_index_file/2]).
+
+-export_type([ index/0
+             , cache/0
+             ]).
 
 %%%*_ MACROS and SPECS =========================================================
 
 -include("gululog_priv.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
+-opaque cache() :: ets:tid().
+
 -record(idx, { version :: logvsn()
              , segid   :: segid()
              , fd      :: file:fd()
-             , tid     :: ets:tid()
+             , tid     :: cache()
              }).
 
 -opaque index() :: #idx{}.
@@ -61,24 +71,29 @@ init(Dir) ->
                           Files -> {false, Files}
                         end,
   LatestSegment = hd(IndexFiles),
-  SegId = gululog_name:to_segid(LatestSegment),
+  SegId = gululog_name:filename_to_segid(LatestSegment),
   {Version, WriterFd} = open_writer_fd(IsNew, LatestSegment),
-  Tid = ets:new(?MODULE, [ ordered_set
-                         , public
-                         , {read_concurrency, true} ]),
-  ok = init_ets_from_index_files(Tid, IndexFiles),
+  Tid = init_cache(IndexFiles),
   #idx{ version = Version
       , segid   = SegId
       , fd      = WriterFd
       , tid     = Tid
       }.
 
+%% @doc Read index files to populate ets cache table.
+-spec init_cache([filename()]) -> cache().
+init_cache(IndexFiles) ->
+  Tid = ets:new(?MODULE, [ ordered_set
+                         , public
+                         , {read_concurrency, true} ]),
+  ok = init_ets_from_index_files(Tid, IndexFiles),
+  Tid.
+
 %% @doc Close write fd, delete ets cache table.
 -spec flush_close(index()) -> ok.
 flush_close(#idx{fd = Fd, tid = Tid}) ->
-  ok = file:sync(Fd),
-  ok = file:close(Fd),
-  true = ets:delete(Tid),
+  ok = file_sync_close(Fd),
+  ok = close_cache(Tid),
   ok.
 
 %% @doc Append a new index entry.
@@ -87,15 +102,15 @@ flush_close(#idx{fd = Fd, tid = Tid}) ->
 %% 2. LogId should be monotonic. i.e. NewLogId >= LatestLogId + 1
 %% 3. Position should be (at least MIN_LOG_SIZE) greater than the latest position
 %% @end
--spec append(index(), logid(), position()) -> ok | no_return().
+-spec append(index(), logid(), position()) -> index() | no_return().
 append(#idx{ version = ?LOGVSN
            , segid   = SegId
            , fd      = Fd
            , tid     = Tid
-           }, LogId, Position) ->
+           } = Idx, LogId, Position) ->
   ok = file:write(Fd, ?TO_FILE_ENTRY(SegId, LogId, Position)),
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
-  ok.
+  Idx.
 
 %% @doc Delete oldest segment from index
 %% return the segid that is deleted, return 'false' in case:
@@ -123,26 +138,26 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
 switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
   NewSegId = NextLogId,
   {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
-  ok = file:sync(Fd),
-  ok = file:close(Fd),
+  ok = file_sync_close(Fd),
   Idx#idx{segid = NewSegId, fd = NewFd}.
 
 %% @doc Switch to a new log segment, append new index entry.
 -spec switch_append(dirname(), index(), logid(), position()) -> index().
 switch_append(Dir, Idx, LogId, Position) ->
   NewIdx = switch(Dir, Idx, LogId),
-  ok = append(NewIdx, LogId, Position),
-  NewIdx.
+  append(NewIdx, LogId, Position).
 
 %% @doc Locate {SegId, Position} for a given LogId
 %% return {segid(), position()} if the given LogId is found
 %% return 'false' if not in valid range
 %% @end
--spec locate(dirname(), index(), logid()) ->
+-spec locate(dirname(), index() | cache(), logid()) ->
         {segid(), position()} | false | no_return().
 locate(Dir, #idx{tid = Tid}, LogId) ->
-  case ets:lookup(Tid, LogId) of
-    [] ->
+  locate(Dir, Tid, LogId);
+locate(Dir, Tid, LogId) ->
+  case locate_in_cache(Tid, LogId) of
+    false ->
       case is_out_of_range(Tid, LogId) of
         true ->
           false;
@@ -151,18 +166,50 @@ locate(Dir, #idx{tid = Tid}, LogId) ->
           [?ETS_ENTRY(SegId, _, _)] = ets:lookup(Tid, PrevLogId),
           scan_locate(Dir, SegId, LogId)
       end;
-    [?ETS_ENTRY(SegId, LogId, Position)] ->
-      {SegId, Position}
+    Location ->
+      Location
+  end.
+
+%% @doc Locate {SegId, Position} for a given LogId
+%% return {segid(), position()} from cached records
+%% @end
+-spec locate_in_cache(cache(), logid()) ->
+        {segid(), position()} | false | no_return().
+locate_in_cache(Tid, LogId) ->
+  case ets:lookup(Tid, LogId) of
+    []                                   -> false;
+    [?ETS_ENTRY(SegId, LogId, Position)] -> {SegId, Position}
   end.
 
 %% @doc Get latest logid from index.
 %% return 'false' iif it is an empty index.
 %% @end
--spec get_latest_logid(index()) -> logid() | false.
+-spec get_latest_logid(index() | cache()) -> logid() | false.
 get_latest_logid(#idx{tid = Tid}) ->
+  get_latest_logid(Tid);
+get_latest_logid(Tid) ->
   case ets:last(Tid) of
     '$end_of_table' -> false;
     LogId           -> LogId
+  end.
+
+-spec close_cache(cache()) -> ok.
+close_cache(Tid) ->
+  true = ets:delete(Tid),
+  ok.
+
+%% @doc To find the byte offset for the logid next to the given one in the index file.
+%% Clled when trying to repair possibly corrupted segment
+%% @end
+-spec get_next_position_in_index_file(filename(), logid()) -> position().
+get_next_position_in_index_file(FileName, LogId) ->
+  SegId = gululog_name:filename_to_segid(FileName),
+  Fd = open_reader_fd(FileName),
+  try
+    {ok, <<Version:8>>} = file:read(Fd, 1),
+    (LogId - SegId + 1) * file_entry_bytes(Version) + 1
+  after
+    file:close(Fd)
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
@@ -196,7 +243,7 @@ scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
 %% 'true' when trying to locate a 'future' log
 %% or e.g. an old segment has been removed.
 %% @end
--spec is_out_of_range(ets:tid(), logid()) -> boolean().
+-spec is_out_of_range(cache(), logid()) -> boolean().
 is_out_of_range(Tid, LogId) ->
   Latest = ets:last(Tid),
   (Latest =:= '$end_of_table') orelse %% empty table
@@ -206,20 +253,28 @@ is_out_of_range(Tid, LogId) ->
 %% @private Create ets table to keep the index entries.
 %% TODO: less indexing for earlier segments in case there are too many entries.
 %% @end
--spec init_ets_from_index_files(ets:tid(), [filename()]) -> ok | no_return().
+-spec init_ets_from_index_files(cache(), [filename()]) -> ok | no_return().
 init_ets_from_index_files(_Tid, []) -> ok;
 init_ets_from_index_files(Tid, [FileName | Rest]) ->
-  SegId = gululog_name:to_segid(FileName),
+  SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
-  try
-    {ok, <<Version:8>>} = file:read(Fd, 1),
-    ok = init_ets_from_index_file(Version, Tid, SegId, Fd),
-    init_ets_from_index_files(Tid, Rest)
-  after
-    file:close(Fd)
+  case file:read(Fd, 1) of
+    eof ->
+      ok = file:close(Fd),
+      init_ets_from_index_files(Tid, Rest);
+    {ok, <<Version:8>>} ->
+      try
+        ok = init_ets_from_index_file(Version, Tid, SegId, Fd)
+      after
+        ok = file:close(Fd)
+      end,
+      init_ets_from_index_files(Tid, Rest);
+    {error, Reason} ->
+      file:close(Fd),
+      erlang:error(Reason)
   end.
 
--spec init_ets_from_index_file(logvsn(), ets:tid(), segid(), file:fd()) -> ok | no_return().
+-spec init_ets_from_index_file(logvsn(), cache(), segid(), file:fd()) -> ok | no_return().
 init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
   case file:read(Fd, ?FILE_ENTRY_BYTES_V1 * ?FILE_READ_CHUNK) of
     eof ->
@@ -234,27 +289,45 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% return all filenames in reversed order.
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
-wildcard_reverse(Dir) ->
-  gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_IDX).
+wildcard_reverse(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(boolean(), filename()) -> file:fd() | no_return().
-open_writer_fd(IsNew, FileName) ->
+open_writer_fd(true, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
-  %% Write the first 1 byte version number in case it's a new file
-  [ok = file:write(Fd, <<?LOGVSN:8>>) || IsNew],
-  {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
-  _ = file:position(Fd, eof),
-  {Version, Fd}.
+  ok = file:write(Fd, <<?LOGVSN:8>>),
+  {?LOGVSN, Fd};
+open_writer_fd(false, FileName) ->
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  %% read two bytes instead of 1
+  case file:pread(Fd, 0, 2) of
+    {ok, <<_Version:8>>} ->
+      %% only the fist version byte was written
+      %% re-open it as a new to ensure latest version
+      ok = file:close(Fd),
+      open_writer_fd(true, FileName);
+    {ok, <<Version:8, _:8>>} ->
+      %% more than the version byte
+      {ok, Position} = file:position(Fd, eof),
+      %% Hopefully, this assertion never fails,
+      %% In case it happens, add a function to resect the corrupted tail.
+      0 = (Position - 1) rem file_entry_bytes(Version), %% assert
+      {Version, Fd}
+  end.
+
+%% @private Get per-version file entry bytes.
+-spec file_entry_bytes(logvsn()) -> bytecnt().
+file_entry_bytes(1) -> ?FILE_ENTRY_BYTES_V1.
 
 %% @private Open 'raw' mode fd for reader.
+-spec open_reader_fd(filename()) -> file:fd() | no_return().
 open_reader_fd(FileName) ->
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
   Fd.
 
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
-mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?DOT_IDX.
+mk_name(Dir, SegId) -> gululog_name:mk_idx_name(Dir, SegId).
 
 %% @private Get oldest segid from index
 -spec get_oldest_segid(index()) -> logid() | false.
@@ -266,6 +339,12 @@ get_oldest_segid(#idx{tid = Tid}) ->
       [{LogId, {SegId, _}}] = ets:lookup(Tid, LogId),
       LogId = SegId %% assert
   end.
+
+%% @private Sync and and close file.
+-spec file_sync_close(file:fds()) -> ok.
+file_sync_close(Fd) ->
+  ok = file:sync(Fd),
+  ok = file:close(Fd).
 
 %%%*_ TESTS ====================================================================
 

@@ -14,8 +14,7 @@ deps:
 clean:
 	$(REBAR) clean
 
-tests: REBAR := GULULOG_TEST=1 $(REBAR)
-tests: deps compile
-	$(REBAR) skip_deps=true eunit
-	$(REBAR) ct
+ct: REBAR := TEST=1 $(REBAR)
+ct: deps compile
+	$(REBAR) skip_deps=true ct
 

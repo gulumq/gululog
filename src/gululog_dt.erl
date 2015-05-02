@@ -6,6 +6,7 @@
         , os_sec/0
         , micro_to_utc_str/1
         , sec_to_utc_str/1
+        , sec_to_utc_str_compact/1
         , utc_str_to_micro/1
         , utc_str_to_sec/1
         ]).
@@ -43,6 +44,14 @@ sec_to_utc_str(Sec) ->
     io_lib:format("~.4w-~2.2.0w-~2.2.0w ~2.2.0w:~2.2.0w:~2.2.0w",
                   [Year, Month, Day, Hour, Minute, Second])).
 
+-spec sec_to_utc_str_compact(os_sec()) -> string().
+sec_to_utc_str_compact(Sec) ->
+  {{Year, Month, Day}, {Hour, Minute, Second}} =
+    calendar:now_to_universal_time(sec_to_now(Sec)),
+  lists:flatten(
+    io_lib:format("~.4w~2.2.0w~2.2.0w~2.2.0w~2.2.0w~2.2.0w",
+                  [Year, Month, Day, Hour, Minute, Second])).
+
 -spec utc_str_to_sec(string()) -> os_sec().
 utc_str_to_sec(Str) ->
   utc_str_to_micro(Str) div ?MEGA.
@@ -77,19 +86,24 @@ micro_to_now(MicroSec) ->
 -include_lib("eunit/include/eunit.hrl").
 
 gululog_dt_test_() ->
-  [ {"micro_to_utc_str/1",
+  [ {"micro_to_utc_str/1 & utc_str_to_micro/1",
       fun() ->
          Micro         = os_micro(),
          MicroStr      = micro_to_utc_str(Micro),
          MicroStrMicro = utc_str_to_micro(MicroStr),
          ?assertEqual(Micro, MicroStrMicro)
        end}
-  , {"sec_to_utc_str/1",
+  , {"sec_to_utc_str/1 & utc_str_to_sec/1",
        fun() ->
          Sec       = os_sec(),
          SecStr    = sec_to_utc_str(Sec),
          SecStrSec = utc_str_to_sec(SecStr),
          ?assertEqual(Sec, SecStrSec)
+       end}
+  , {"sec_to_utc_str_compact/1",
+       fun() ->
+         Sec = utc_str_to_sec("2015-01-01 01:00:59"),
+         ?assertEqual("20150101010059", sec_to_utc_str_compact(Sec))
        end}
   ].
 

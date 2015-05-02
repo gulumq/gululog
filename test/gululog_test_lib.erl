@@ -12,11 +12,18 @@
 %%%*_ API FUNCTIONS ============================================================
 
 cleanup(Dir) ->
-  Files = filelib:wildcard("*" ++ ?DOT_SEG, Dir) ++
-          filelib:wildcard("*" ++ ?DOT_IDX, Dir),
-  lists:foreach(fun(File) ->
-                  ok = file:delete(filename:join(Dir, File))
-                end, Files).
+  Files = gululog_name:wildcard_idx_name_reversed(Dir) ++
+          gululog_name:wildcard_seg_name_reversed(Dir),
+  BackupDirs = filelib:wildcard("backup*", Dir),
+  ok = lists:foreach(fun(File) ->
+                        ok = file:delete(File)
+                     end, Files),
+  ok = lists:foreach(fun(BackupDir0) ->
+                        BackupDir = filename:join(Dir, BackupDir0),
+                        ok = cleanup(BackupDir),
+                        ok = file:del_dir(BackupDir)
+                     end, BackupDirs).
+
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
