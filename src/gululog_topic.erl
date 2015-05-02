@@ -106,6 +106,11 @@ keyget(Key, KvList, Default) ->
 
 %%%*_ TESTS ====================================================================
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+-endif.
+
 %%%_* Emacs ====================================================================
 %%% Local Variables:
 %%% allout-layout: t

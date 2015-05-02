@@ -68,7 +68,7 @@ init(Dir) ->
                           Files -> {false, Files}
                         end,
   LatestSegment = hd(IndexFiles),
-  SegId = gululog_name:to_segid(LatestSegment),
+  SegId = gululog_name:filename_to_segid(LatestSegment),
   {Version, WriterFd} = open_writer_fd(IsNew, LatestSegment),
   Tid = init_cache(IndexFiles),
   #idx{ version = Version
@@ -200,7 +200,7 @@ close_cache(Tid) ->
 %% @end
 -spec get_next_position_in_index_file(filename(), logid()) -> position().
 get_next_position_in_index_file(FileName, LogId) ->
-  SegId = gululog_name:to_segid(FileName),
+  SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
   try
     {ok, <<Version:8>>} = file:read(Fd, 1),
@@ -253,7 +253,7 @@ is_out_of_range(Tid, LogId) ->
 -spec init_ets_from_index_files(cache(), [filename()]) -> ok | no_return().
 init_ets_from_index_files(_Tid, []) -> ok;
 init_ets_from_index_files(Tid, [FileName | Rest]) ->
-  SegId = gululog_name:to_segid(FileName),
+  SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
   try
     {ok, <<Version:8>>} = file:read(Fd, 1),
@@ -278,8 +278,7 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% return all filenames in reversed order.
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
-wildcard_reverse(Dir) ->
-  gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_IDX).
+wildcard_reverse(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(boolean(), filename()) -> file:fd() | no_return().
@@ -317,7 +316,7 @@ open_reader_fd(FileName) ->
 
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
-mk_name(Dir, SegId) -> gululog_name:from_segid(Dir, SegId) ++ ?DOT_IDX.
+mk_name(Dir, SegId) -> gululog_name:mk_idx_name(Dir, SegId).
 
 %% @private Get oldest segid from index
 -spec get_oldest_segid(index()) -> logid() | false.

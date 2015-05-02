@@ -162,8 +162,7 @@ read_version(Fd) ->
     {error, Reason}          -> erlang:error(Reason)
   end.
 
-mk_name(Dir, SegId) ->
-  gululog_name:from_segid(Dir, SegId) ++ ?DOT_SEG.
+mk_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).
 
 %%%*_ TESTS ====================================================================
 

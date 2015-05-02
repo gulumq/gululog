@@ -35,8 +35,8 @@ repair_dir(Dir, ?undef) ->
 repair_dir(Dir, BackupDir) ->
   case filelib:is_dir(Dir) of
     true ->
-      IdxFiles = gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_IDX),
-      SegFiles = gululog_name:wildcard_full_path_name_reversed(Dir, ?DOT_SEG),
+      IdxFiles = gululog_name:wildcard_idx_name_reversed(Dir),
+      SegFiles = gululog_name:wildcard_seg_name_reversed(Dir),
       {ok, BackedupFiles} = repair_dir(IdxFiles, SegFiles, BackupDir, []),
       {ok, RepairedFiles} = repair_seg(IdxFiles -- BackedupFiles,
                                        SegFiles -- BackedupFiles, Dir, BackupDir),
@@ -54,25 +54,25 @@ repair_dir(Dir, BackupDir) ->
 repair_dir([], [], _BackupDir, BackedupFiles) ->
   {ok, BackedupFiles};
 repair_dir([IdxFile | IdxFiles], [], BackupDir, BackedupFiles) ->
-  ok = move_idx_file(IdxFile, BackupDir),
+  ok = move_file(IdxFile, BackupDir),
   repair_dir(IdxFiles, [], BackupDir, [IdxFile | BackedupFiles]);
 repair_dir([], [SegFile | SegFiles], BackupDir, BackedupFiles) ->
-  ok = move_seg_file(SegFile, BackupDir),
+  ok = move_file(SegFile, BackupDir),
   repair_dir([], SegFiles, BackupDir, [SegFile | BackedupFiles]);
 repair_dir([IdxFile | IdxFiles], [SegFile | SegFiles], BackupDir, BackedupFiles) ->
-  IdxSegId = gululog_name:to_segid(IdxFile),
-  SegSegId = gululog_name:to_segid(SegFile),
+  IdxSegId = gululog_name:filename_to_segid(IdxFile),
+  SegSegId = gululog_name:filename_to_segid(SegFile),
   case IdxSegId =:= SegSegId of
     true  ->
       repair_dir(IdxFiles, SegFiles, BackupDir, BackedupFiles);
     false when IdxSegId > SegSegId ->
       %% index file is ahead of segment file
-      ok = move_idx_file(IdxFile, BackupDir),
+      ok = move_file(IdxFile, BackupDir),
       repair_dir(IdxFiles, [SegFile | SegFiles], BackupDir,
                  [IdxFile | BackedupFiles]);
     false when IdxSegId < SegSegId ->
       %% segment file is ahead of index file
-      ok = move_seg_file(SegFile, BackupDir),
+      ok = move_file(SegFile, BackupDir),
       repair_dir([IdxFile | IdxFiles], SegFiles, BackupDir,
                  [SegFile | BackedupFiles])
   end.
@@ -95,13 +95,13 @@ repair_seg([IdxFile | _], [SegFile | _], Dir, BackupDir) ->
 
 repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
   LatestLogId = gululog_idx:get_latest_logid(IndexCache),
-  SegId = gululog_name:to_segid(IdxFile),
+  SegId = gululog_name:filename_to_segid(IdxFile),
   RCursor = gululog_r_cur:open(Dir, SegId),
   case integral_pos(SegId, IndexCache, LatestLogId, RCursor) of
     bof ->
       %% the whole segment is empty or corrupted
-      ok = move_idx_file(IdxFile, BackupDir),
-      ok = move_seg_file(SegFile, BackupDir),
+      ok = move_file(IdxFile, BackupDir),
+      ok = move_file(SegFile, BackupDir),
       {ok, [{?REPAIR_BACKEDUP, IdxFile}, {?REPAIR_BACKEDUP, SegFile}]};
     LatestLogId ->
       %% Latest log is integral, nothing to repair
@@ -113,8 +113,8 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
       true = (LogId < LatestLogId),
       IdxBytes = gululog_idx:get_next_position_in_index_file(IdxFile, LogId),
       {SegId, SegBytes} = gululog_idx:locate_in_cache(IndexCache, LogId + 1),
-      ok = truncate_idx_file(IdxFile, IdxBytes, BackupDir),
-      ok = truncate_seg_file(IdxFile, SegBytes, BackupDir),
+      ok = truncate_file(IdxFile, IdxBytes, BackupDir),
+      ok = truncate_file(IdxFile, SegBytes, BackupDir),
       {ok, [{?REPAIR_RESECTED, IdxFile}, {?REPAIR_RESECTED, SegFile}]}
   end.
 
@@ -165,43 +165,24 @@ try_read_log(RCursor) ->
     throw : corrupted_body   -> {error, corrupted_header}
   end.
 
-%% @private Move idx file to target dir.
--spec move_idx_file(filename(), dirname()) -> ok.
-move_idx_file(IdxFile, TargetDir) -> move_file(IdxFile, TargetDir, ?DOT_IDX).
-
-%% @private Move seg file to target dir.
--spec move_seg_file(filename(), dirname()) -> ok.
-move_seg_file(SegFile, TargetDir) -> move_file(SegFile, TargetDir, ?DOT_SEG).
-
 %% @private Copy the file to another name and remove the source file.
--spec move_file(filename(), dirname(), string()) -> ok.
-move_file(Source, TargetDir, Suffix) ->
-  ok = copy_file(Source, TargetDir, Suffix),
+-spec move_file(filename(), dirname()) -> ok.
+move_file(Source, TargetDir) ->
+  ok = copy_file(Source, TargetDir),
   ok = file:delete(Source).
 
 %% @private Copy .idx or .seg file to the given directory.
--spec copy_file(filename(), dirname(), string()) -> ok.
-copy_file(Source, TargetDir, Suffix) ->
-  SegId = gululog_name:to_segid(Source),
-  TargetFile = gululog_name:from_segid(TargetDir, SegId) ++ Suffix,
+-spec copy_file(filename(), dirname()) -> ok.
+copy_file(Source, TargetDir) ->
+  TargetFile = backup_filename(Source, TargetDir),
   ok = filelib:ensure_dir(TargetFile),
   {ok, _} = file:copy(Source, TargetFile),
   ok.
 
-%% @private Truncate idx file from the given position.
--spec truncate_idx_file(filename(), position(), dirname()) -> ok.
-truncate_idx_file(IdxFile, Position, BackupDir) ->
-  truncate_file(IdxFile, Position, BackupDir, ?DOT_IDX).
-
-%% @private Truncate seg file from the given position.
--spec truncate_seg_file(filename(), position(), dirname()) -> ok.
-truncate_seg_file(SegFile, Position, BackupDir) ->
-  truncate_file(SegFile, Position, BackupDir, ?DOT_SEG).
-
 %% @private Backup the original file, then truncate at the given position.
--spec truncate_file(filename(), position(), dirname(), string()) -> ok.
-truncate_file(FileName, Position, BackupDir, Suffix) ->
-  ok = copy_file(FileName, BackupDir, Suffix),
+-spec truncate_file(filename(), position(), dirname()) -> ok.
+truncate_file(FileName, Position, BackupDir) ->
+  ok = copy_file(FileName, BackupDir),
   %% open with 'read' mode, otherwise truncate does not work
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   try
@@ -211,10 +192,19 @@ truncate_file(FileName, Position, BackupDir, Suffix) ->
     file:close(Fd)
   end.
 
-%% @private make a timestamp
+%% @private Make a timestamp in string format.
 -spec time_now_str() -> string().
 time_now_str() ->
   gululog_dt:sec_to_utc_str_compact(gululog_dt:os_sec()).
+
+%% @private Make backup file name.
+-spec backup_filename(filename(), dirname()) -> filename().
+backup_filename(SourceName, BackupDir) ->
+  SegId = gululog_name:filename_to_segid(SourceName),
+  case gululog_name:filename_to_type(SourceName) of
+    ?FILE_TYPE_IDX -> gululog_name:mk_idx_name(BackupDir, SegId);
+    ?FILE_TYPE_SEG -> gululog_name:mk_seg_name(BackupDir, SegId)
+  end.
 
 %%%*_ TESTS ====================================================================
 
@@ -226,25 +216,24 @@ move_test_() ->
   Dir = filename:join(Cwd, "move-test"),
   _ = file:del_dir(Dir),
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
-  FileBaseName = gululog_name:from_segid(Dir, 1),
+  SegId = 1,
   BackupDir = filename:join(Dir, "backup"),
-  BackupFileBaseName = gululog_name:from_segid(BackupDir, 1),
-  IdxFile = FileBaseName ++ ?DOT_IDX,
-  SegFile = FileBaseName ++ ?DOT_SEG,
-  BackupIdxFile = BackupFileBaseName ++ ?DOT_IDX,
-  BackupSegFile = BackupFileBaseName ++ ?DOT_SEG,
+  IdxFile = gululog_name:mk_idx_name(Dir, SegId),
+  SegFile = gululog_name:mk_seg_name(Dir, SegId),
+  BackupIdxFile = gululog_name:mk_idx_name(BackupDir, SegId),
+  BackupSegFile = gululog_name:mk_seg_name(BackupDir, SegId),
   ok = file:write_file(IdxFile, <<"idx">>, [binary]),
   ok = file:write_file(SegFile, <<"seg">>, [binary]),
   [ { "move idx file"
     , fun() ->
-        ok = move_idx_file(IdxFile, BackupDir),
+        ok = move_file(IdxFile, BackupDir),
         ?assertEqual({ok, <<"idx">>}, file:read_file(BackupIdxFile)),
         ?assertEqual(false, filelib:is_file(IdxFile))
       end
     }
   , { "move seg file"
     , fun() ->
-        ok = move_seg_file(SegFile, BackupDir),
+        ok = move_file(SegFile, BackupDir),
         ?assertEqual({ok, <<"seg">>}, file:read_file(BackupSegFile)),
         ?assertEqual(false, filelib:is_file(SegFile))
       end
@@ -256,25 +245,24 @@ truncate_test_() ->
   Dir = filename:join(Cwd, "truncate-test"),
   _ = file:del_dir(Dir),
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
-  FileBaseName = gululog_name:from_segid(Dir, 1),
+  SegId = 1,
   BackupDir = filename:join(Dir, "backup"),
-  BackupFileBaseName = gululog_name:from_segid(BackupDir, 1),
-  IdxFile = FileBaseName ++ ?DOT_IDX,
-  SegFile = FileBaseName ++ ?DOT_SEG,
-  BackupIdxFile = BackupFileBaseName ++ ?DOT_IDX,
-  BackupSegFile = BackupFileBaseName ++ ?DOT_SEG,
+  IdxFile = gululog_name:mk_idx_name(Dir, SegId),
+  SegFile = gululog_name:mk_seg_name(Dir, SegId),
+  BackupIdxFile = gululog_name:mk_idx_name(BackupDir, SegId),
+  BackupSegFile = gululog_name:mk_seg_name(BackupDir, SegId),
   ok = file:write_file(IdxFile, <<"0123456789">>, [binary]),
   ok = file:write_file(SegFile, <<"0123456789">>, [binary]),
   [ { "truncate idx file"
     , fun() ->
-        ok = truncate_idx_file(IdxFile, 1, BackupDir),
-        ?assertEqual({ok, <<"0">>},          file:read_file(IdxFile)),
+        ok = truncate_file(IdxFile, 1, BackupDir),
+        ?assertEqual({ok, <<"0">>}, file:read_file(IdxFile)),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupIdxFile))
       end
     }
   , { "truncate seg file"
     , fun() ->
-        ok = truncate_seg_file(SegFile, 10, BackupDir),
+        ok = truncate_file(SegFile, 10, BackupDir),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile)),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupSegFile))
       end

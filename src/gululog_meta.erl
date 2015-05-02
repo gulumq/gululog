@@ -31,7 +31,6 @@
               }).
 
 -opaque meta() :: #meta{}.
--type ts() :: os_sec().
 
 -spec logid(meta()) -> logid().
 logid(#meta{logid = LogId}) -> LogId.

@@ -63,15 +63,15 @@ t_backup_seg(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = filename:join(Dir, "backup"),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
-  SegFile = gululog_name:from_segid(Dir, 0) ++ ?DOT_SEG,
+  SegFile = gululog_name:mk_seg_name(Dir, 0),
   ?assertEqual([{?REPAIR_BACKEDUP, SegFile}], RepairedFiles),
-  BackupFile = gululog_name:from_segid(BackupDir, 0) ++ ?DOT_SEG,
+  BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
   ?assertEqual(true, filelib:is_file(BackupFile)).
 
 t_backup_idx({init, Config}) ->
   Dir = ?config(dir),
   %% create some files
-  Topic0 = gululog_topic:init(Dir, [{segMB, 1}]),
+  Topic0 = gululog_topic:init(Dir, []),
   Topic1 = gululog_topic:append(Topic0, <<"header">>, <<"body">>),
   ok = gululog_topic:close(Topic1),
   %% add a new segment file but no index file
@@ -84,9 +84,13 @@ t_backup_idx(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = filename:join(Dir, "backup"),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
-  IdxFile = gululog_name:from_segid(Dir, 1) ++ ?DOT_IDX,
-  ?assertEqual([{?REPAIR_BACKEDUP, IdxFile}], RepairedFiles),
-  BackupFile = gululog_name:from_segid(BackupDir, 1) ++ ?DOT_IDX,
+  Idx0File = gululog_name:mk_idx_name(Dir, 0),
+  Seg0File = gululog_name:mk_seg_name(Dir, 0),
+  Idx1File = gululog_name:mk_idx_name(Dir, 1),
+  ?assertEqual([{?REPAIR_BACKEDUP, Idx1File}], RepairedFiles),
+  BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
+  ?assertEqual(true, filelib:is_file(Idx0File)),
+  ?assertEqual(true, filelib:is_file(Seg0File)),
   ?assertEqual(true, filelib:is_file(BackupFile)).
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
