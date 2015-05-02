@@ -12,6 +12,7 @@
         , switch/3            %% switch to a new segment
         , switch_append/4     %% switch then append
         , delete_oldest_seg/2 %% Delete oldest segment from index
+        , delete_from_cache/2 %% Delete given log entry from index cache
         ]).
 
 %% APIs for readers (public access)
@@ -133,8 +134,8 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
 -spec switch(dirname(), index(), logid()) -> index().
 switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
   NewSegId = NextLogId,
-  {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
   ok = file_sync_close(Fd),
+  {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
   Idx#idx{segid = NewSegId, fd = NewFd}.
 
 %% @doc Switch to a new log segment, append new index entry.
@@ -208,6 +209,31 @@ get_next_position_in_index_file(FileName, LogId) ->
     file:close(Fd)
   end.
 
+%% @doc Delete given log entry (logid) from index.
+%% Return new index.
+%% NB! Refuse to delete the first log entry of each segment (i.e. when segid = logid).
+%% @end
+-spec delete_from_cache(index() | cache(), logid()) -> cache() | index().
+delete_from_cache(#idx{tid = Tid} = Idx, LogId) ->
+  Tid = delete_from_cache(Tid, LogId),
+  Idx;
+delete_from_cache(Tid, LogId) ->
+  LatestLogId = get_latest_logid(Tid),
+  case LogId =:= LatestLogId of
+    true ->
+      false; %% never delete the latest to keep a correect boundary check
+    false ->
+      case ets:lookup(Tid, LogId) of
+        [] ->
+          false; %% either out of range, or already deleted
+        [?ETS_ENTRY(SegId, SegId, _Pos)] ->
+          false; %% refuse to delete
+        [?ETS_ENTRY(_SegId, LogId, _Pos)] ->
+          ets:delete(Tid, LogId)
+      end
+  end,
+  Tid.
+
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Scan the index file to locate the log position in segment file
@@ -230,9 +256,10 @@ scan_locate(Dir, SegId, LogId) ->
         {segid(), position()} | no_return().
 scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
   %% The offset caculate by per-entry size + one byte version
-  Location = (LogId - SegId - 1) * ?FILE_ENTRY_BYTES_V1 + 1,
-  {ok, Bin} = file:pread(Fd, Location, ?FILE_ENTRY_BYTES_V1),
-  ?ETS_ENTRY(SegId, LogId, Position) = ?FROM_FILE_ENTRY_V1(SegId, Bin),
+  Location = (LogId - SegId) * ?FILE_ENTRY_BYTES_V1 + 1,
+  {ok, <<FileEntry:?FILE_ENTRY_BITS_V1>>} =
+    file:pread(Fd, Location, ?FILE_ENTRY_BYTES_V1),
+  ?ETS_ENTRY(SegId, LogId, Position) = ?FROM_FILE_ENTRY_V1(SegId, FileEntry),
   {SegId, Position}.
 
 %% @private Check if the given log ID is out of indexing range.
@@ -264,10 +291,7 @@ init_ets_from_index_files(Tid, [FileName | Rest]) ->
       after
         ok = file:close(Fd)
       end,
-      init_ets_from_index_files(Tid, Rest);
-    {error, Reason} ->
-      file:close(Fd),
-      erlang:error(Reason)
+      init_ets_from_index_files(Tid, Rest)
   end.
 
 -spec init_ets_from_index_file(logvsn(), cache(), segid(), file:fd()) -> ok | no_return().
@@ -296,20 +320,13 @@ open_writer_fd(true, FileName) ->
 open_writer_fd(false, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   %% read two bytes instead of 1
-  case file:pread(Fd, 0, 2) of
-    {ok, <<_Version:8>>} ->
-      %% only the fist version byte was written
-      %% re-open it as a new to ensure latest version
-      ok = file:close(Fd),
-      open_writer_fd(true, FileName);
-    {ok, <<Version:8, _:8>>} ->
-      %% more than the version byte
-      {ok, Position} = file:position(Fd, eof),
-      %% Hopefully, this assertion never fails,
-      %% In case it happens, add a function to resect the corrupted tail.
-      0 = (Position - 1) rem file_entry_bytes(Version), %% assert
-      {Version, Fd}
-  end.
+  {ok, <<Version:8>>} = file:read(Fd, 1),
+  %% more than the version byte
+  {ok, Position} = file:position(Fd, eof),
+  %% Hopefully, this assertion never fails,
+  %% In case it happens, add a function to resect the corrupted tail.
+  0 = (Position - 1) rem file_entry_bytes(Version), %% assert
+  {Version, Fd}.
 
 %% @private Get per-version file entry bytes.
 -spec file_entry_bytes(logvsn()) -> bytecnt().
