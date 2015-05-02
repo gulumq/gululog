@@ -51,7 +51,7 @@ init(Dir, Options) ->
   Idx = gululog_idx:init(Dir),
   NextLogId = case gululog_idx:get_latest_logid(Idx) of
                 false -> 0;
-                N     -> N
+                N     -> N + 1
               end,
   #topic{ dir   = Dir
         , idx   = Idx

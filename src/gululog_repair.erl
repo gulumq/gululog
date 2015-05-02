@@ -37,7 +37,7 @@ repair_dir(Dir, BackupDir) ->
     true ->
       IdxFiles = gululog_name:wildcard_idx_name_reversed(Dir),
       SegFiles = gululog_name:wildcard_seg_name_reversed(Dir),
-      {ok, BackedupFiles} = repair_dir(IdxFiles, SegFiles, BackupDir, []),
+      {ok, BackedupFiles} = repair_dir(IdxFiles, SegFiles, BackupDir),
       {ok, RepairedFiles} = repair_seg(IdxFiles -- BackedupFiles,
                                        SegFiles -- BackedupFiles, Dir, BackupDir),
       {ok, [{?REPAIR_BACKEDUP, F} || F <- BackedupFiles] ++ RepairedFiles};
@@ -49,33 +49,27 @@ repair_dir(Dir, BackupDir) ->
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Repair log integrity in the given dir.
--spec repair_dir([filename()], [filename()], dirname(), [filename()]) ->
-        {ok, [filename()]} | no_return().
-repair_dir([], [], _BackupDir, BackedupFiles) ->
-  {ok, BackedupFiles};
-repair_dir([IdxFile | IdxFiles], [], BackupDir, BackedupFiles) ->
-  ok = move_file(IdxFile, BackupDir),
-  repair_dir(IdxFiles, [], BackupDir, [IdxFile | BackedupFiles]);
-repair_dir([], [SegFile | SegFiles], BackupDir, BackedupFiles) ->
-  ok = move_file(SegFile, BackupDir),
-  repair_dir([], SegFiles, BackupDir, [SegFile | BackedupFiles]);
-repair_dir([IdxFile | IdxFiles], [SegFile | SegFiles], BackupDir, BackedupFiles) ->
-  IdxSegId = gululog_name:filename_to_segid(IdxFile),
-  SegSegId = gululog_name:filename_to_segid(SegFile),
-  case IdxSegId =:= SegSegId of
-    true  ->
-      repair_dir(IdxFiles, SegFiles, BackupDir, BackedupFiles);
-    false when IdxSegId > SegSegId ->
-      %% index file is ahead of segment file
-      ok = move_file(IdxFile, BackupDir),
-      repair_dir(IdxFiles, [SegFile | SegFiles], BackupDir,
-                 [IdxFile | BackedupFiles]);
-    false when IdxSegId < SegSegId ->
-      %% segment file is ahead of index file
-      ok = move_file(SegFile, BackupDir),
-      repair_dir([IdxFile | IdxFiles], SegFiles, BackupDir,
-                 [SegFile | BackedupFiles])
-  end.
+%% move unpaired index and segment files to backup dir.
+%% @end
+-spec repair_dir([filename()], [filename()], dirname()) -> {ok, [filename()]} | no_return().
+repair_dir(IdxFiles, SegFiles, BackupDir) ->
+  ToSegIdFun = fun gululog_name:filename_to_segid/1,
+  IdxSegIds = sets:from_list(lists:map(ToSegIdFun, IdxFiles)),
+  SegSegIds = sets:from_list(lists:map(ToSegIdFun, SegFiles)),
+  UnpairedIdxFiles =
+    lists:filter(
+      fun(IdxFile) ->
+        not sets:is_element(ToSegIdFun(IdxFile), SegSegIds)
+      end, IdxFiles),
+  UnpairedSegFiles =
+    lists:filter(
+      fun(SegFile) ->
+        not sets:is_element(ToSegIdFun(SegFile), IdxSegIds)
+      end, SegFiles),
+  BackedupFiles = UnpairedIdxFiles ++ UnpairedSegFiles,
+  ok = lists:foreach(fun(FileName) -> ok = move_file(FileName, BackupDir) end,
+                     BackedupFiles),
+  {ok, BackedupFiles}.
 
 %% @private Repair segment file.
 %% Assuming that the index file is never corrupted.
@@ -97,56 +91,51 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
   LatestLogId = gululog_idx:get_latest_logid(IndexCache),
   SegId = gululog_name:filename_to_segid(IdxFile),
   RCursor = gululog_r_cur:open(Dir, SegId),
-  case integral_pos(SegId, IndexCache, LatestLogId, RCursor) of
+  case integral_pos(SegId, IndexCache, IdxFile, LatestLogId, RCursor) of
     bof ->
       %% the whole segment is empty or corrupted
       ok = move_file(IdxFile, BackupDir),
       ok = move_file(SegFile, BackupDir),
       {ok, [{?REPAIR_BACKEDUP, IdxFile}, {?REPAIR_BACKEDUP, SegFile}]};
-    LatestLogId ->
-      %% Latest log is integral, nothing to repair
-      true = is_integer(LatestLogId), %% assert
-      {ok, []};
-    LogId ->
-      true = is_integer(LatestLogId),
-      true = is_integer(LogId),
-      true = (LogId < LatestLogId),
-      IdxBytes = gululog_idx:get_next_position_in_index_file(IdxFile, LogId),
-      {SegId, SegBytes} = gululog_idx:locate_in_cache(IndexCache, LogId + 1),
-      ok = truncate_file(IdxFile, IdxBytes, BackupDir),
-      ok = truncate_file(IdxFile, SegBytes, BackupDir),
-      {ok, [{?REPAIR_RESECTED, IdxFile}, {?REPAIR_RESECTED, SegFile}]}
+    {IdxPos, SegPos} ->
+      IsIdxRepaired = maybe_truncate_file(IdxFile, IdxPos, BackupDir),
+      IsSegRepaired = maybe_truncate_file(SegFile, SegPos, BackupDir),
+      {ok, [{?REPAIR_RESECTED, IdxFile} || IsIdxRepaired] ++
+           [{?REPAIR_RESECTED, SegFile} || IsSegRepaired]}
   end.
 
 %% @private Scan from the latest log entry until integrity is found.
 %% Return bof if: 1) the index file is empty
 %%                2) the segment file is empty
 %%                3) the entire segment file is corrupted
-%% otherwise return the latest integral logid.
+%% otherwise return the latest integral positions in index and segment file.
 %% @end
--spec integral_pos(segid(), cache(), false | logid(), empty | r_cursor()) -> logid().
-integral_pos(_SegId, _IndexCache, _LogId, empty) ->
+-spec integral_pos(segid(), cache(), filename(), false | logid(), empty | r_cursor()) ->
+        bof | {IdxPos::position(), SegPos::position()}.
+integral_pos(_SegId, _IndexCache, _IdxFile, _LogId, empty) ->
   %% seg file is empty
   bof;
-integral_pos(_SegId, _IndexCache, false, RCursor) ->
+integral_pos(_SegId, _IndexCache, _IdxFile, false, RCursor) ->
   %% index file has no entry
   ok = gululog_r_cur:close(RCursor),
   bof;
-integral_pos(SegId, _IndexCache, LogId, RCursor) when LogId < SegId ->
+integral_pos(SegId, _IndexCache, _IdxFile, LogId, RCursor) when LogId < SegId ->
   %% Scaned all the way to the beginning of the segment
   ok = gululog_r_cur:close(RCursor),
   bof;
-integral_pos(SegId, IndexCache, LogId, RCursor0) ->
+integral_pos(SegId, IndexCache, IdxFile, LogId, RCursor0) ->
   {SegId, Pos} = gululog_idx:locate_in_cache(IndexCache, LogId),
   RCursor1 = gululog_r_cur:reposition(RCursor0, Pos),
   case try_read_log(RCursor1) of
     {ok, RCursor2} ->
       %% no corruption, return current logid being scaned
+      IdxPos = gululog_idx:get_next_position_in_index_file(IdxFile, LogId),
+      SegPos = gululog_r_cur:current_position(RCursor2),
       ok = gululog_r_cur:close(RCursor2),
-      LogId;
+      {IdxPos, SegPos};
     {error, _Reason} ->
       %% not found or corrupted, keep scaning ealier logs
-      integral_pos(SegId, IndexCache, LogId - 1, RCursor1)
+      integral_pos(SegId, IndexCache, IdxFile, LogId - 1, RCursor1)
   end.
 
 %% @private Try read a log entry from reader cursor.
@@ -154,6 +143,8 @@ integral_pos(SegId, IndexCache, LogId, RCursor0) ->
 %% @end
 -spec try_read_log(r_cursor()) -> {ok, r_cursor()} | {error, Reason}
         when Reason :: not_found
+                     | bad_meta_size
+                     | corrupted_meta
                      | corrupted_header
                      | corrupted_body.
 try_read_log(RCursor) ->
@@ -161,8 +152,7 @@ try_read_log(RCursor) ->
     {RCursor2, _Log}         -> {ok, RCursor2};
     eof                      -> {error, not_found}
   catch
-    throw : corrupted_header -> {error, corrupted_header};
-    throw : corrupted_body   -> {error, corrupted_header}
+    throw : Reason           -> {error, Reason}
   end.
 
 %% @private Copy the file to another name and remove the source file.
@@ -180,14 +170,22 @@ copy_file(Source, TargetDir) ->
   ok.
 
 %% @private Backup the original file, then truncate at the given position.
--spec truncate_file(filename(), position(), dirname()) -> ok.
-truncate_file(FileName, Position, BackupDir) ->
-  ok = copy_file(FileName, BackupDir),
+-spec maybe_truncate_file(filename(), position(), dirname()) -> boolean().
+maybe_truncate_file(FileName, Position, BackupDir) ->
   %% open with 'read' mode, otherwise truncate does not work
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   try
-    {ok, Position} = file:position(Fd, Position),
-    ok = file:truncate(Fd)
+    {ok, Size} = file:position(Fd, eof),
+    true = (Position =< Size), %% assert
+    case Position < Size of
+      true ->
+        ok = copy_file(FileName, BackupDir),
+        {ok, Position} = file:position(Fd, Position),
+        ok = file:truncate(Fd),
+        true;
+      false ->
+        false
+    end
   after
     file:close(Fd)
   end.
@@ -250,21 +248,19 @@ truncate_test_() ->
   IdxFile = gululog_name:mk_idx_name(Dir, SegId),
   SegFile = gululog_name:mk_seg_name(Dir, SegId),
   BackupIdxFile = gululog_name:mk_idx_name(BackupDir, SegId),
-  BackupSegFile = gululog_name:mk_seg_name(BackupDir, SegId),
   ok = file:write_file(IdxFile, <<"0123456789">>, [binary]),
   ok = file:write_file(SegFile, <<"0123456789">>, [binary]),
   [ { "truncate idx file"
     , fun() ->
-        ok = truncate_file(IdxFile, 1, BackupDir),
+        true = maybe_truncate_file(IdxFile, 1, BackupDir),
         ?assertEqual({ok, <<"0">>}, file:read_file(IdxFile)),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupIdxFile))
       end
     }
   , { "truncate seg file"
     , fun() ->
-        ok = truncate_file(SegFile, 10, BackupDir),
-        ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile)),
-        ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupSegFile))
+        false = maybe_truncate_file(SegFile, 10, BackupDir),
+        ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile))
       end
     }
   ].

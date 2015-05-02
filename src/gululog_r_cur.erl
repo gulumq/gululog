@@ -3,8 +3,10 @@
 -module(gululog_r_cur).
 
 -export([ open/2
+        , read/1
         , read/2
         , close/1
+        , current_position/1
         , reposition/2
         ]).
 
@@ -59,6 +61,9 @@ open(Dir, SegId) ->
 close(#rcur{fd = Fd}) -> file:close(Fd).
 
 %% @doc Read one log including head and body.
+read(Cur) -> read(Cur, []).
+
+%% @doc Read one log including head and maybe body.
 -spec read(cursor(), options()) -> {cursor(), log()} | eof.
 read(#rcur{version = Version} = Cursor0, Options) ->
   case read_meta(Cursor0) of
@@ -87,6 +92,10 @@ reposition(#rcur{fd = Fd} = Cur, Position) ->
     Other ->
       erlang:throw({bad_position, Other})
   end.
+
+%% @doc Get current fd pointer position.
+-spec current_position(cursor()) -> position().
+current_position(#rcur{position = Position}) -> Position.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 

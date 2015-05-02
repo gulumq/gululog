@@ -22,9 +22,12 @@
         , locate_in_cache/2
         ]).
 
+%% APIs for repair
 -export([get_next_position_in_index_file/2]).
 
--export_type([index/0]).
+-export_type([ index/0
+             , cache/0
+             ]).
 
 %%%*_ MACROS and SPECS =========================================================
 
@@ -255,12 +258,20 @@ init_ets_from_index_files(_Tid, []) -> ok;
 init_ets_from_index_files(Tid, [FileName | Rest]) ->
   SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
-  try
-    {ok, <<Version:8>>} = file:read(Fd, 1),
-    ok = init_ets_from_index_file(Version, Tid, SegId, Fd),
-    init_ets_from_index_files(Tid, Rest)
-  after
-    file:close(Fd)
+  case file:read(Fd, 1) of
+    eof ->
+      ok = file:close(Fd),
+      init_ets_from_index_files(Tid, Rest);
+    {ok, <<Version:8>>} ->
+      try
+        ok = init_ets_from_index_file(Version, Tid, SegId, Fd)
+      after
+        ok = file:close(Fd)
+      end,
+      init_ets_from_index_files(Tid, Rest);
+    {error, Reason} ->
+      file:close(Fd),
+      erlang:error(Reason)
   end.
 
 -spec init_ets_from_index_file(logvsn(), cache(), segid(), file:fd()) -> ok | no_return().
@@ -290,7 +301,7 @@ open_writer_fd(false, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   %% read two bytes instead of 1
   case file:pread(Fd, 0, 2) of
-    {ok, <<Version:8>>} ->
+    {ok, <<_Version:8>>} ->
       %% only the fist version byte was written
       %% re-open it as a new to ensure latest version
       ok = file:close(Fd),
