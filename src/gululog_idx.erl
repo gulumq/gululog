@@ -115,16 +115,12 @@ append(#idx{ version = ?LOGVSN
 %% @doc Delete oldest segment from index
 %% return the segid that is deleted, return 'false' in case:
 %% 1. nothing to delete
-%% 2. the oldest is also the latest, it is considered as purging
-%%    the entire log, which is not a usual use case, it should be done
-%%    using purge/1
+%% 2. the oldest is also the latest, it is considered as purging the entire log
 %% @end
--spec delete_oldest_seg(dirname(), index()) -> boolean() | segid().
+-spec delete_oldest_seg(dirname(), index()) -> segid() | false.
 delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
   case get_oldest_segid(Index) of
-    false ->
-      false;
-    SegIdToDelete when SegIdToDelete < CurrentSegId ->
+    SegIdToDelete when is_integer(SegIdToDelete) andalso SegIdToDelete < CurrentSegId ->
       Ms = ets:fun2ms(fun(?ETS_ENTRY(SegId, _, _)) -> SegId =:= SegIdToDelete end),
       _ = ets:select_delete(Tid, Ms),
       ok = file:delete(mk_name(Dir, SegIdToDelete)),
