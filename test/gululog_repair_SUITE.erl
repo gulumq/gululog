@@ -310,25 +310,19 @@ t_empty_idx_and_seg_file({init, Config}) ->
 t_empty_idx_and_seg_file({'end', _Config}) -> ok;
 t_empty_idx_and_seg_file(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, ?undef),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Seg1File = gululog_name:mk_seg_name(Dir, 1),
-  ?assertEqual([{?REPAIR_BACKEDUP, Idx1File},
-                {?REPAIR_BACKEDUP, Seg1File}], RepairedFiles),
-  Idx1BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
-  Seg1BackupFile = gululog_name:mk_seg_name(BackupDir, 1),
+  ?assertEqual([{?REPAIR_DELETED, Idx1File},
+                {?REPAIR_DELETED, Seg1File}], RepairedFiles),
   %% assert segment 0 files are still there
   ?assertEqual(true, filelib:is_file(Idx0File)),
   ?assertEqual(true, filelib:is_file(Seg0File)),
   %% assert segment 1 files are removed
   ?assertEqual(false, filelib:is_file(Idx1File)),
   ?assertEqual(false, filelib:is_file(Seg1File)),
-  %% assert segment 1 files are backedup
-  ?assertEqual(true, filelib:is_file(Idx1BackupFile)),
-  ?assertEqual(true, filelib:is_file(Seg1BackupFile)),
   ok.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================

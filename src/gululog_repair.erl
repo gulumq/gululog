@@ -29,18 +29,17 @@ repair_dir(Dir) -> repair_dir(Dir, ?undef).
 
 -spec repair_dir(dirname(), ?undef | dirname()) ->
         {ok, [{tag(), filename()}]} | no_return().
-repair_dir(Dir, ?undef) ->
-  BackupDir = filename:join(Dir, "repair-" ++ time_now_str()),
-  repair_dir(Dir, BackupDir);
 repair_dir(Dir, BackupDir) ->
   case filelib:is_dir(Dir) of
     true ->
       IdxFiles = gululog_name:wildcard_idx_name_reversed(Dir),
       SegFiles = gululog_name:wildcard_seg_name_reversed(Dir),
-      {ok, BackedupFiles} = repair_dir(IdxFiles, SegFiles, BackupDir),
-      {ok, RepairedFiles} = repair_seg(IdxFiles -- BackedupFiles,
-                                       SegFiles -- BackedupFiles, Dir, BackupDir),
-      {ok, [{?REPAIR_BACKEDUP, F} || F <- BackedupFiles] ++ RepairedFiles};
+      RepairedFiles1 = repair_dir(IdxFiles, SegFiles, BackupDir),
+      RemovedFiles = [F || {_ReapirTag, F} <- RepairedFiles1],
+      RepairedFiles2 = repair_seg(IdxFiles -- RemovedFiles,
+                                  SegFiles -- RemovedFiles,
+                                  Dir, BackupDir),
+      {ok, RepairedFiles1 ++ RepairedFiles2};
     false ->
       %% nonexist dir, do nothing
       {ok, []}
@@ -51,7 +50,8 @@ repair_dir(Dir, BackupDir) ->
 %% @private Repair log integrity in the given dir.
 %% move unpaired index and segment files to backup dir.
 %% @end
--spec repair_dir([filename()], [filename()], dirname()) -> {ok, [filename()]} | no_return().
+-spec repair_dir([filename()], [filename()], ?undef | dirname()) ->
+        [{tag(), filename()}].
 repair_dir(IdxFiles, SegFiles, BackupDir) ->
   ToSegIdFun = fun gululog_name:filename_to_segid/1,
   IdxSegIds = sets:from_list(lists:map(ToSegIdFun, IdxFiles)),
@@ -66,19 +66,17 @@ repair_dir(IdxFiles, SegFiles, BackupDir) ->
       fun(SegFile) ->
         not sets:is_element(ToSegIdFun(SegFile), IdxSegIds)
       end, SegFiles),
-  BackedupFiles = UnpairedIdxFiles ++ UnpairedSegFiles,
-  ok = lists:foreach(fun(FileName) -> ok = move_file(FileName, BackupDir) end,
-                     BackedupFiles),
-  {ok, BackedupFiles}.
+  lists:map(fun(FileName) -> remove_file(FileName, BackupDir) end,
+            UnpairedIdxFiles ++ UnpairedSegFiles).
 
 %% @private Repair segment file.
 %% Assuming that the index file is never corrupted.
 %% In case there is a resection of corrupted segment tail,
 %% an resection is done for the index file as well.
 %% @end
--spec repair_seg([filename()], [filename()], dirname(), dirname()) ->
-        {ok, [{tag(), filename()}]}.
-repair_seg([], [], _Dir, _BackupDir) -> {ok, []};
+-spec repair_seg([filename()], [filename()], dirname(), ?undef | dirname()) ->
+        [{tag(), filename()}].
+repair_seg([], [], _Dir, _BackupDir) -> [];
 repair_seg([IdxFile | _], [SegFile | _], Dir, BackupDir) ->
   IndexCache = gululog_idx:init_cache([IdxFile]),
   try
@@ -94,14 +92,12 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
   case integral_pos(SegId, IndexCache, IdxFile, LatestLogId, RCursor) of
     bof ->
       %% the whole segment is empty or corrupted
-      ok = move_file(IdxFile, BackupDir),
-      ok = move_file(SegFile, BackupDir),
-      {ok, [{?REPAIR_BACKEDUP, IdxFile}, {?REPAIR_BACKEDUP, SegFile}]};
+      [remove_file(IdxFile, BackupDir), remove_file(SegFile, BackupDir)];
     {IdxPos, SegPos} ->
       IsIdxRepaired = maybe_truncate_file(IdxFile, IdxPos, BackupDir),
       IsSegRepaired = maybe_truncate_file(SegFile, SegPos, BackupDir),
-      {ok, [{?REPAIR_RESECTED, IdxFile} || IsIdxRepaired] ++
-           [{?REPAIR_RESECTED, SegFile} || IsSegRepaired]}
+      [{?REPAIR_RESECTED, IdxFile} || IsIdxRepaired] ++
+      [{?REPAIR_RESECTED, SegFile} || IsSegRepaired]
   end.
 
 %% @private Scan from the latest log entry until integrity is found.
@@ -156,10 +152,14 @@ try_read_log(RCursor) ->
   end.
 
 %% @private Copy the file to another name and remove the source file.
--spec move_file(filename(), dirname()) -> ok.
-move_file(Source, TargetDir) ->
-  ok = copy_file(Source, TargetDir),
-  ok = file:delete(Source).
+-spec remove_file(filename(), ?undef | dirname()) -> ok.
+remove_file(FileName, ?undef) ->
+  ok = file:delete(FileName),
+  {?REPAIR_DELETED, FileName};
+remove_file(FileName, TargetDir) ->
+  ok = copy_file(FileName, TargetDir),
+  ok = file:delete(FileName),
+  {?REPAIR_BACKEDUP, FileName}.
 
 %% @private Copy .idx or .seg file to the given directory.
 -spec copy_file(filename(), dirname()) -> ok.
@@ -170,7 +170,7 @@ copy_file(Source, TargetDir) ->
   ok.
 
 %% @private Backup the original file, then truncate at the given position.
--spec maybe_truncate_file(filename(), position(), dirname()) -> boolean().
+-spec maybe_truncate_file(filename(), position(), ?undef | dirname()) -> boolean().
 maybe_truncate_file(FileName, Position, BackupDir) ->
   %% open with 'read' mode, otherwise truncate does not work
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
@@ -179,7 +179,7 @@ maybe_truncate_file(FileName, Position, BackupDir) ->
     true = (Position =< Size), %% assert
     case Position < Size of
       true ->
-        ok = copy_file(FileName, BackupDir),
+        [ok = copy_file(FileName, BackupDir) || BackupDir =/= ?undef],
         {ok, Position} = file:position(Fd, Position),
         ok = file:truncate(Fd),
         true;
@@ -189,11 +189,6 @@ maybe_truncate_file(FileName, Position, BackupDir) ->
   after
     file:close(Fd)
   end.
-
-%% @private Make a timestamp in string format.
--spec time_now_str() -> string().
-time_now_str() ->
-  gululog_dt:sec_to_utc_str_compact(gululog_dt:os_sec()).
 
 %% @private Make backup file name.
 -spec backup_filename(filename(), dirname()) -> filename().
@@ -224,15 +219,15 @@ move_test_() ->
   ok = file:write_file(SegFile, <<"seg">>, [binary]),
   [ { "move idx file"
     , fun() ->
-        ok = move_file(IdxFile, BackupDir),
+        _ = remove_file(IdxFile, BackupDir),
         ?assertEqual({ok, <<"idx">>}, file:read_file(BackupIdxFile)),
         ?assertEqual(false, filelib:is_file(IdxFile))
       end
     }
   , { "move seg file"
     , fun() ->
-        ok = move_file(SegFile, BackupDir),
-        ?assertEqual({ok, <<"seg">>}, file:read_file(BackupSegFile)),
+        _ = remove_file(SegFile, ?undef),
+        ?assertEqual(false, filelib:is_file(BackupSegFile)),
         ?assertEqual(false, filelib:is_file(SegFile))
       end
     }

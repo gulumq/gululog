@@ -25,8 +25,9 @@
 
 -define(REPAIR_BACKEDUP, backedup).
 -define(REPAIR_RESECTED, resected).
+-define(REPAIR_DELETED, deleted).
 
--type repair_tag() :: ?REPAIR_BACKEDUP | ?REPAIR_RESECTED.
+-type repair_tag() :: ?REPAIR_BACKEDUP | ?REPAIR_RESECTED | ?REPAIR_DELETED.
 
 -define(FILE_TYPE_IDX, idx).
 -define(FILE_TYPE_SEG, seg).
