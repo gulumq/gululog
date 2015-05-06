@@ -21,8 +21,9 @@
 %% @doc Repair log integrity in the given dir.
 %% There is no aotomicity when switching .idx and .seg files to new segments,
 %% this function is to repair the data integrity in the given directory.
-%% 1. move the un-paired ones from the log directory to backup directory.
-%% 2. resect the corrupted segmentfile (file before resection is backed up).
+%% 1. remove (maybe backup) unpaired .idx and .seg fiels.
+%% 2. resect the corrupted .idx and .seg tails
+%%    (files are backed up before resection if backup dir is given).
 %% @end
 -spec repair_dir(dirname()) -> {ok, [{tag(), filename()}]} | no_return().
 repair_dir(Dir) -> repair_dir(Dir, ?undef).
@@ -48,7 +49,7 @@ repair_dir(Dir, BackupDir) ->
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Repair log integrity in the given dir.
-%% move unpaired index and segment files to backup dir.
+%% remove (backup if backup dir is given) unpaired index and segment files
 %% @end
 -spec repair_dir([filename()], [filename()], ?undef | dirname()) ->
         [{tag(), filename()}].
