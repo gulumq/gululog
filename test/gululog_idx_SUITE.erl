@@ -17,7 +17,7 @@
 -export([ t_basic_flow/1
         , t_init_from_existing/1
         , t_scan_file_to_locate/1
-        , t_truncate/1
+        , t_truncate_after/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -139,11 +139,11 @@ t_scan_file_to_locate(Config) when is_list(Config) ->
   ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
   ok.
 
-t_truncate({init, Config}) ->
+t_truncate_after({init, Config}) ->
   Config;
-t_truncate({'end', _Config}) ->
+t_truncate_after({'end', _Config}) ->
   ok;
-t_truncate(Config) when is_list(Config) ->
+t_truncate_after(Config) when is_list(Config) ->
   Dir = ?config(dir),
   T1 = gululog_topic:init(Dir, []),
   T2 = gululog_topic:append(T1, <<"key">>, <<"value">>),
@@ -160,7 +160,7 @@ t_truncate(Config) when is_list(Config) ->
   Expect = [{gululog_name:mk_idx_name(Dir, 0), gululog_name:mk_seg_name(Dir, 0)},
             {gululog_name:mk_idx_name(Dir, 5), gululog_name:mk_seg_name(Dir, 5)},
             {gululog_name:mk_idx_name(Dir, 6), gululog_name:mk_seg_name(Dir, 6)}],
-  {ok, TruncateResult} = gululog_idx:truncate(Dir, Idx, 3),
+  {ok, TruncateResult} = gululog_idx:truncate_after(Dir, Idx, 3),
   ?assertEqual(Expect, lists:sort(TruncateResult)).
 
 %%%_* Emacs ====================================================================

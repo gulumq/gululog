@@ -13,7 +13,7 @@
         , switch_append/4     %% switch then append
         , delete_oldest_seg/2 %% Delete oldest segment from index
         , delete_from_cache/2 %% Delete given log entry from index cache
-        , truncate/3          %% Truncate after given logid
+        , truncate_after/3    %% Truncate after given logid
         ]).
 
 %% APIs for readers (public access)
@@ -238,8 +238,8 @@ delete_from_cache(Tid, LogId) ->
 %% @doc Truncate after given logid from index and segment
 %% Return idx file and seg file for deleted or truncated
 %% @End
--spec truncate(dirname(), index(), logid()) -> {ok, [{filename(), filename()}]}.
-truncate(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
+-spec truncate_after(dirname(), index(), logid()) -> {ok, [{filename(), filename()}]}.
+truncate_after(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
   {LogIdToTruncateSegId, _} = locate_in_cache(Tid, LogIdToTruncate),
   Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogId, _) = EtsEntry) when LogId > LogIdToTruncate -> EtsEntry end),
   case EtsEntryList = ets:select(Tid, Ms) of
@@ -248,8 +248,8 @@ truncate(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
     _ ->
       {TruncateList, DeleteList} =
         lists:partition(fun(?ETS_ENTRY(SegIdToTruncateX, _, _)) -> SegIdToTruncateX == LogIdToTruncateSegId end, EtsEntryList),
-      DeleteResult   = truncate_delete_do(DeleteList, Tid, Dir),
-      TruncateResult = truncate_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate),
+      DeleteResult   = truncate_after_delete_do(DeleteList, Tid, Dir),
+      TruncateResult = truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate),
       {ok, DeleteResult ++ TruncateResult}
   end.
 
@@ -379,11 +379,11 @@ file_sync_close(Fd) ->
   ok = file:close(Fd).
 
 %% @private Delete index and segment files for truncate
--spec truncate_delete_do([{logid(), {segid(), position()}}], cache(), dirname()) ->
+-spec truncate_after_delete_do([{logid(), {segid(), position()}}], cache(), dirname()) ->
   [{filename(), filename()}].
-truncate_delete_do([], _Tid, _Dir) ->
+truncate_after_delete_do([], _Tid, _Dir) ->
   [];
-truncate_delete_do(DeleteList, Tid, Dir) ->
+truncate_after_delete_do(DeleteList, Tid, Dir) ->
   [begin
      ets:delete(Tid, LogIdX),
      ok = file:delete(SegFileD = gululog_name:mk_seg_name(Dir, SegIdX)),
@@ -392,11 +392,11 @@ truncate_delete_do(DeleteList, Tid, Dir) ->
    end || {LogIdX, {SegIdX, _}} <- DeleteList].
 
 %% @private Truncate index and segment files for truncate
--spec truncate_truncate_do([{logid(), {segid(), position()}}], cache(), dirname(), logid()) ->
+-spec truncate_after_truncate_do([{logid(), {segid(), position()}}], cache(), dirname(), logid()) ->
   [{filename(), filename()}].
-truncate_truncate_do([], _Tid, _Dir, _LogIdToTruncate) ->
+truncate_after_truncate_do([], _Tid, _Dir, _LogIdToTruncate) ->
   [];
-truncate_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate) ->
+truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate) ->
   [ets:delete(Tid, LogIdX) || {LogIdX, {_SegIdX, _}} <- TruncateList],
   %% truncate seg file
   {SegIdToTruncate, SegPosition} = locate_in_cache(Tid, LogIdToTruncate),
