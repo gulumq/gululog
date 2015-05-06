@@ -239,14 +239,15 @@ delete_from_cache(Tid, LogId) ->
 %% Return idx file and seg file for deleted or truncated
 %% @End
 -spec truncate(dirname(), index(), logid()) -> {ok, [{filename(), filename()}]}.
-truncate(Dir, #idx{tid = Tid, segid = SegId} = _Idx, LogIdToTruncate) ->
+truncate(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
+  {LogIdToTruncateSegId, _} = locate_in_cache(Tid, LogIdToTruncate),
   Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogId, _) = EtsEntry) when LogId > LogIdToTruncate -> EtsEntry end),
   case EtsEntryList = ets:select(Tid, Ms) of
     [] ->
       {ok, []};
     _ ->
       {TruncateList, DeleteList} =
-        lists:partition(fun(?ETS_ENTRY(SegIdToTruncateX, _, _)) -> SegIdToTruncateX =/= SegId end, EtsEntryList),
+        lists:partition(fun(?ETS_ENTRY(SegIdToTruncateX, _, _)) -> SegIdToTruncateX == LogIdToTruncateSegId end, EtsEntryList),
       DeleteResult   = truncate_delete_do(DeleteList, Tid, Dir),
       TruncateResult = truncate_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate),
       {ok, DeleteResult ++ TruncateResult}

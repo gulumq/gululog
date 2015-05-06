@@ -153,9 +153,13 @@ t_truncate(Config) when is_list(Config) ->
   T6 = gululog_topic:append(T5, <<"key">>, <<"value">>),
   T7 = gululog_topic:force_switch(T6),
   T8 = gululog_topic:append(T7, <<"key">>, <<"value">>),
-  Idx = erlang:element(4, T8),
+  T8 = gululog_topic:append(T7, <<"key">>, <<"value">>),
+  T9 = gululog_topic:force_switch(T8),
+  T10 = gululog_topic:append(T9, <<"key">>, <<"value">>),
+  Idx = erlang:element(4, T10),
   Expect = [{gululog_name:mk_idx_name(Dir, 0), gululog_name:mk_seg_name(Dir, 0)},
-            {gululog_name:mk_idx_name(Dir, 5), gululog_name:mk_seg_name(Dir, 5)}],
+            {gululog_name:mk_idx_name(Dir, 5), gululog_name:mk_seg_name(Dir, 5)},
+            {gululog_name:mk_idx_name(Dir, 6), gululog_name:mk_seg_name(Dir, 6)}],
   {ok, TruncateResult} = gululog_idx:truncate(Dir, Idx, 3),
   ?assertEqual(Expect, lists:sort(TruncateResult)).
 
