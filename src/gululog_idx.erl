@@ -245,11 +245,12 @@ truncate_after(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
     [] ->
       {ok, []};
     _ ->
-      {LogIdToTruncateSegId, _} = locate_in_cache(Tid, LogIdToTruncate),
+      {LogIdToTruncateSegId, LogIdToTruncatePosition} = locate_in_cache(Tid, LogIdToTruncate),
       {TruncateList, DeleteList} =
         lists:partition(fun(?ETS_ENTRY(SegIdToTruncateX, _, _)) -> SegIdToTruncateX == LogIdToTruncateSegId end, EtsEntryList),
       DeleteResult   = truncate_after_delete_do(DeleteList, Tid, Dir),
-      TruncateResult = truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate),
+      TruncateResult = truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate,
+                                                  LogIdToTruncateSegId, LogIdToTruncatePosition),
       {ok, DeleteResult ++ TruncateResult}
   end.
 
@@ -392,14 +393,14 @@ truncate_after_delete_do(DeleteList, Tid, Dir) ->
    end || {LogIdX, {SegIdX, _}} <- DeleteList].
 
 %% @private Truncate index and segment files for truncate
--spec truncate_after_truncate_do([{logid(), {segid(), position()}}], cache(), dirname(), logid()) ->
+-spec truncate_after_truncate_do([{logid(), {segid(), position()}}],
+                                 cache(), dirname(), logid(), segid(), position()) ->
   [{filename(), filename()}].
-truncate_after_truncate_do([], _Tid, _Dir, _LogIdToTruncate) ->
+truncate_after_truncate_do([], _Tid, _Dir, _LogIdToTruncate, _SegIdToTruncate, _SegPosition) ->
   [];
-truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate) ->
+truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate, SegIdToTruncate, SegPosition) ->
   [ets:delete(Tid, LogIdX) || {LogIdX, {_SegIdX, _}} <- TruncateList],
   %% truncate seg file
-  {SegIdToTruncate, SegPosition} = locate_in_cache(Tid, LogIdToTruncate),
   SegFile = gululog_name:mk_seg_name(Dir, SegIdToTruncate),
   {ok, FdSeg} = file:open(SegFile, [write, read, raw, binary]),
   {ok, _NewSegPosition} = file:position(FdSeg, SegPosition),
