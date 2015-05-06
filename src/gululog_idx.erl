@@ -319,9 +319,7 @@ open_writer_fd(true, FileName) ->
   {?LOGVSN, Fd};
 open_writer_fd(false, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
-  %% read two bytes instead of 1
   {ok, <<Version:8>>} = file:read(Fd, 1),
-  %% more than the version byte
   {ok, Position} = file:position(Fd, eof),
   %% Hopefully, this assertion never fails,
   %% In case it happens, add a function to resect the corrupted tail.
