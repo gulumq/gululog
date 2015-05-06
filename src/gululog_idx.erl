@@ -240,12 +240,12 @@ delete_from_cache(Tid, LogId) ->
 %% @End
 -spec truncate_after(dirname(), index(), logid()) -> {ok, [{filename(), filename()}]}.
 truncate_after(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
-  {LogIdToTruncateSegId, _} = locate_in_cache(Tid, LogIdToTruncate),
   Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogId, _) = EtsEntry) when LogId > LogIdToTruncate -> EtsEntry end),
   case EtsEntryList = ets:select(Tid, Ms) of
     [] ->
       {ok, []};
     _ ->
+      {LogIdToTruncateSegId, _} = locate_in_cache(Tid, LogIdToTruncate),
       {TruncateList, DeleteList} =
         lists:partition(fun(?ETS_ENTRY(SegIdToTruncateX, _, _)) -> SegIdToTruncateX == LogIdToTruncateSegId end, EtsEntryList),
       DeleteResult   = truncate_after_delete_do(DeleteList, Tid, Dir),
