@@ -6,6 +6,7 @@
         , append/3
         , close/1
         , force_switch/1
+        , truncate_inclusive/2
         ]).
 
 -export_type([topic/0]).
@@ -107,6 +108,24 @@ force_switch(#topic{ dir   = Dir
   Topic#topic{ idx = NewIdx
              , cur = NewCur
              }.
+
+%% @doc Truncate the topic from (including) the given logid.
+-spec truncate_inclusive(topic(), logid()) -> {topic(), [filename()]}.
+truncate_inclusive(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId) ->
+  {SegId, SegPosition} = gululog_idx:locate(Dir, Idx, LogId),
+  %% delete the truncated cache entries
+  %% close writer fd
+  %% delete the files > SegId
+  %% truncate the file = SegId
+  %% re-open the writer fd
+  {NewIdx, DeletedIdxFiles} = gululog_idx:truncate(Idx, SegId, LogId),
+  %% close writer fd
+  %% delete the files > SegId
+  %% truncate the file = SegId
+  %% re-open the writer fd
+  {NewCur, DeletedSegFiles} = gululog_w_cur:truncate(Cur, SegId, SegPosition),
+  NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
+  {NewTopic, DeletedIdxFiles ++ DeletedSegFiles}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 

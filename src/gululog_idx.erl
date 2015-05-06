@@ -24,7 +24,7 @@
         ]).
 
 %% APIs for repair
--export([get_next_position_in_index_file/2]).
+-export([get_position_in_index_file/2]).
 
 -export_type([ index/0
              , cache/0
@@ -198,13 +198,13 @@ close_cache(Tid) ->
 %% @doc To find the byte offset for the logid next to the given one in the index file.
 %% Clled when trying to repair possibly corrupted segment
 %% @end
--spec get_next_position_in_index_file(filename(), logid()) -> position().
-get_next_position_in_index_file(FileName, LogId) ->
+-spec get_position_in_index_file(filename(), logid()) -> position().
+get_position_in_index_file(FileName, LogId) ->
   SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
   try
     {ok, <<Version:8>>} = file:read(Fd, 1),
-    (LogId - SegId + 1) * file_entry_bytes(Version) + 1
+    (LogId - SegId) * file_entry_bytes(Version) + 1
   after
     file:close(Fd)
   end.

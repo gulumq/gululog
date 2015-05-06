@@ -126,7 +126,7 @@ integral_pos(SegId, IndexCache, IdxFile, LogId, RCursor0) ->
   case try_read_log(RCursor1) of
     {ok, RCursor2} ->
       %% no corruption, return current logid being scaned
-      IdxPos = gululog_idx:get_next_position_in_index_file(IdxFile, LogId),
+      IdxPos = gululog_idx:get_position_in_index_file(IdxFile, LogId + 1),
       SegPos = gululog_r_cur:current_position(RCursor2),
       ok = gululog_r_cur:close(RCursor2),
       {IdxPos, SegPos};
