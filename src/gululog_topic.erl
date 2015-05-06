@@ -43,7 +43,7 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Initialize topic from the given directory.
-%% Assuming the directory has integrity log files ensured by
+%% Assuming the directory has integrity in log files ensured by
 %% gululog_repair:repair_dir/2
 %% @end
 -spec init(dirname(), options()) -> topic().
