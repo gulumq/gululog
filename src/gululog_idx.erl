@@ -244,9 +244,12 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _) = EtsEntry) when LogIdX >= LogId -> EtsEntry end),
   [_ | _] = EtsEntryList = ets:select(Tid, Ms),
   lists:map(fun(?ETS_ENTRY(_, LogIdX, _)) -> ets:delete(Tid, LogIdX) end, EtsEntryList),
-  DeleteList = lists:usort(lists:filtermap(fun(?ETS_ENTRY(SegIdX, _, _)) ->
-                                             SegIdX > SegId
-                                           end, EtsEntryList)),
+  DeleteList = lists:usort(filtermap(fun(?ETS_ENTRY(SegIdX, _, _)) ->
+                                         case SegIdX > SegId of
+                                            true -> {SegIdX > SegId, SegIdX};
+                                            _    -> false
+                                         end
+                                     end, EtsEntryList)),
   %% close writer fd
   file_sync_close(Fd),
   %% delete idx file for > segid
@@ -391,12 +394,12 @@ file_sync_close(Fd) ->
 -spec truncate_delete_do([{logid(), {segid(), position()}}], dirname(), ?undef | dirname()) ->
         [filename()].
 truncate_delete_do(DeleteList, Dir, BackupDir) ->
-  SegIdList = lists:usort([SegIdX || {_, {SegIdX, _}} <- DeleteList]),
+
   [begin
      FileName = gululog_name:mk_idx_name(Dir, SegIdX),
      gululog_file:remove_file(FileName, BackupDir),
      FileName
-   end || SegIdX <- SegIdList].
+   end || SegIdX <- DeleteList].
 
 %% @private Truncate index file.
 -spec truncate_truncate_do(dirname(), segid(), logid(), ?undef | dirname()) ->
@@ -406,6 +409,18 @@ truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxPosition = get_position_in_index_file(IdxFile, LogId),
   gululog_file:maybe_truncate_file(IdxFile, IdxPosition, BackupDir),
   [IdxFile].
+
+%% @private Filtermap, R15B03 did not has this function in lists module 
+filtermap(F, [Hd|Tail]) ->
+  case F(Hd) of
+    true ->
+      [Hd|filtermap(F, Tail)];
+    {true,Val} ->
+      [Val|filtermap(F, Tail)];
+    false ->
+      filtermap(F, Tail)
+  end;
+filtermap(F, []) when is_function(F, 1) -> [].
 
 %%%*_ TESTS ====================================================================
 
