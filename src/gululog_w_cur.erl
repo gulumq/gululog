@@ -140,23 +140,16 @@ wildcard_reverse(Dir) -> gululog_name:wildcard_seg_name_reversed(Dir).
 %% @private Truncate segment file.
 truncate_truncate_do(Dir, SegId, SegPosition, BackupDir) ->
   SegFile = gululog_name:mk_seg_name(Dir, SegId),
-  gululog_repair:maybe_truncate_file(SegFile, SegPosition, BackupDir),
+  gululog_file:maybe_truncate_file(SegFile, SegPosition, BackupDir),
   [SegFile].
 
 %% %private Delete segment file.
 truncate_delete_do(Dir, DeleteList, BackupDir) ->
   [begin
       FileName = gululog_name:mk_seg_name(Dir, SegIdX),
-      remove_file(FileName, BackupDir),
+      gululog_file:remove_file(FileName, BackupDir),
       FileName
    end || SegIdX <- lists:usort(DeleteList)].
-
-%% maybe need move it to util module
-remove_file(FileName, ?undef) ->
-  ok = file:delete(FileName);
-remove_file(FileName, BackupDir) ->
-  ok = gululog_repair:copy_file(FileName, BackupDir),
-  ok = file:delete(FileName).
 
 %%%*_ TESTS ====================================================================
 

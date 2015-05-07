@@ -8,9 +8,6 @@
         , repair_dir/2
         ]).
 
--export([ copy_file/2
-        , maybe_truncate_file/3]).
-
 %%%*_ MACROS and SPECS =========================================================
 
 -include("gululog_priv.hrl").
@@ -70,7 +67,7 @@ repair_dir(IdxFiles, SegFiles, BackupDir) ->
       fun(SegFile) ->
         not sets:is_element(ToSegIdFun(SegFile), IdxSegIds)
       end, SegFiles),
-  lists:map(fun(FileName) -> remove_file(FileName, BackupDir) end,
+  lists:map(fun(FileName) -> gululog_file:remove_file(FileName, BackupDir) end,
             UnpairedIdxFiles ++ UnpairedSegFiles).
 
 %% @private Repair segment file.
@@ -96,10 +93,11 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
   case integral_pos(SegId, IndexCache, IdxFile, LatestLogId, RCursor) of
     bof ->
       %% the whole segment is empty or corrupted
-      [remove_file(IdxFile, BackupDir), remove_file(SegFile, BackupDir)];
+      [gululog_file:remove_file(IdxFile, BackupDir),
+       gululog_file:remove_file(SegFile, BackupDir)];
     {IdxPos, SegPos} ->
-      IsIdxRepaired = maybe_truncate_file(IdxFile, IdxPos, BackupDir),
-      IsSegRepaired = maybe_truncate_file(SegFile, SegPos, BackupDir),
+      IsIdxRepaired = gululog_file:maybe_truncate_file(IdxFile, IdxPos, BackupDir),
+      IsSegRepaired = gululog_file:maybe_truncate_file(SegFile, SegPos, BackupDir),
       [{?REPAIR_RESECTED, IdxFile} || IsIdxRepaired] ++
       [{?REPAIR_RESECTED, SegFile} || IsSegRepaired]
   end.
@@ -155,54 +153,6 @@ try_read_log(RCursor) ->
     throw : Reason           -> {error, Reason}
   end.
 
-%% @private Copy the file to another name and remove the source file.
--spec remove_file(filename(), ?undef | dirname()) -> ok.
-remove_file(FileName, ?undef) ->
-  ok = file:delete(FileName),
-  {?REPAIR_DELETED, FileName};
-remove_file(FileName, TargetDir) ->
-  ok = copy_file(FileName, TargetDir),
-  ok = file:delete(FileName),
-  {?REPAIR_BACKEDUP, FileName}.
-
-%% @private Copy .idx or .seg file to the given directory.
--spec copy_file(filename(), dirname()) -> ok.
-copy_file(Source, TargetDir) ->
-  TargetFile = backup_filename(Source, TargetDir),
-  ok = filelib:ensure_dir(TargetFile),
-  {ok, _} = file:copy(Source, TargetFile),
-  ok.
-
-%% @private Backup the original file, then truncate at the given position.
--spec maybe_truncate_file(filename(), position(), ?undef | dirname()) -> boolean().
-maybe_truncate_file(FileName, Position, BackupDir) ->
-  %% open with 'read' mode, otherwise truncate does not work
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
-  try
-    {ok, Size} = file:position(Fd, eof),
-    true = (Position =< Size), %% assert
-    case Position < Size of
-      true ->
-        [ok = copy_file(FileName, BackupDir) || BackupDir =/= ?undef],
-        {ok, Position} = file:position(Fd, Position),
-        ok = file:truncate(Fd),
-        true;
-      false ->
-        false
-    end
-  after
-    file:close(Fd)
-  end.
-
-%% @private Make backup file name.
--spec backup_filename(filename(), dirname()) -> filename().
-backup_filename(SourceName, BackupDir) ->
-  SegId = gululog_name:filename_to_segid(SourceName),
-  case gululog_name:filename_to_type(SourceName) of
-    ?FILE_TYPE_IDX -> gululog_name:mk_idx_name(BackupDir, SegId);
-    ?FILE_TYPE_SEG -> gululog_name:mk_seg_name(BackupDir, SegId)
-  end.
-
 %%%*_ TESTS ====================================================================
 
 -ifdef(TEST).
@@ -223,14 +173,14 @@ move_test_() ->
   ok = file:write_file(SegFile, <<"seg">>, [binary]),
   [ { "move idx file"
     , fun() ->
-        _ = remove_file(IdxFile, BackupDir),
+        _ = gululog_file:remove_file(IdxFile, BackupDir),
         ?assertEqual({ok, <<"idx">>}, file:read_file(BackupIdxFile)),
         ?assertEqual(false, filelib:is_file(IdxFile))
       end
     }
   , { "move seg file"
     , fun() ->
-        _ = remove_file(SegFile, ?undef),
+        _ = gululog_file:remove_file(SegFile, ?undef),
         ?assertEqual(false, filelib:is_file(BackupSegFile)),
         ?assertEqual(false, filelib:is_file(SegFile))
       end
@@ -251,14 +201,14 @@ truncate_test_() ->
   ok = file:write_file(SegFile, <<"0123456789">>, [binary]),
   [ { "truncate idx file"
     , fun() ->
-        true = maybe_truncate_file(IdxFile, 1, BackupDir),
+        true = gululog_file:maybe_truncate_file(IdxFile, 1, BackupDir),
         ?assertEqual({ok, <<"0">>}, file:read_file(IdxFile)),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupIdxFile))
       end
     }
   , { "truncate seg file"
     , fun() ->
-        false = maybe_truncate_file(SegFile, 10, BackupDir),
+        false = gululog_file:maybe_truncate_file(SegFile, 10, BackupDir),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile))
       end
     }

@@ -386,7 +386,7 @@ truncate_delete_do(DeleteList, Dir, BackupDir) ->
   SegIdList = lists:usort([SegIdX || {_, {SegIdX, _}} <- DeleteList]),
   [begin
      FileName = gululog_name:mk_idx_name(Dir, SegIdX),
-     remove_file(FileName, BackupDir),
+     gululog_file:remove_file(FileName, BackupDir),
      FileName
    end || SegIdX <- SegIdList].
 
@@ -396,15 +396,8 @@ truncate_delete_do(DeleteList, Dir, BackupDir) ->
 truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = gululog_name:mk_idx_name(Dir, SegId),
   IdxPosition = get_position_in_index_file(IdxFile, LogId),
-  gululog_repair:maybe_truncate_file(IdxFile, IdxPosition, BackupDir),
+  gululog_file:maybe_truncate_file(IdxFile, IdxPosition, BackupDir),
   [IdxFile].
-
-%% maybe need move it to util module
-remove_file(FileName, ?undef) ->
-  ok = file:delete(FileName);
-remove_file(FileName, BackupDir) ->
-  ok = gululog_repair:copy_file(FileName, BackupDir),
-  ok = file:delete(FileName).
 
 %%%*_ TESTS ====================================================================
 
