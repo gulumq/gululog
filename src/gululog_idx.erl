@@ -239,7 +239,7 @@ delete_from_cache(Tid, LogId) ->
 %% Return new index and index file for deleted or truncated
 %% @End
 -spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
-  {index(), [filename()]}.
+        {index(), [filename()]}.
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _) = EtsEntry) when LogIdX >= LogId -> EtsEntry end),
   [_ | _] = EtsEntryList = ets:select(Tid, Ms),
@@ -381,7 +381,7 @@ file_sync_close(Fd) ->
 
 %% @private Delete index file.
 -spec truncate_delete_do([{logid(), {segid(), position()}}], dirname(), ?undef | dirname()) ->
-  [filename()].
+        [filename()].
 truncate_delete_do(DeleteList, Dir, BackupDir) ->
   SegIdList = lists:usort([SegIdX || {_, {SegIdX, _}} <- DeleteList]),
   [begin
@@ -392,7 +392,7 @@ truncate_delete_do(DeleteList, Dir, BackupDir) ->
 
 %% @private Truncate index file.
 -spec truncate_truncate_do(dirname(), segid(), logid(), ?undef | dirname()) ->
-  [filename()].
+        [filename()].
 truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = gululog_name:mk_idx_name(Dir, SegId),
   IdxPosition = get_position_in_index_file(IdxFile, LogId),

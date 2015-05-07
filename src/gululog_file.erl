@@ -25,7 +25,7 @@ remove_file(FileName, TargetDir) ->
   ok = file:rename(FileName, TargetFile),
   {?REPAIR_BACKEDUP, FileName}.
 
-%% @doc Backup the original file, then truncate at the given position.
+%% @doc Maybe backup the original file, then truncate at the given position.
 %% @end
 -spec maybe_truncate_file(filename(), position(), ?undef | dirname()) -> boolean().
 maybe_truncate_file(FileName, Position, BackupDir) ->

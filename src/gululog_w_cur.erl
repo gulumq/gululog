@@ -107,7 +107,7 @@ switch_append(Dir, OldCursor, LogId, Header, Body) ->
 %% Return new writer cur and delete segment files
 %% @end
 -spec truncate(dirname(), cursor(), segid(), position(), [segid()], ?undef | dirname()) ->
-  {cursor(), [filename()]}.
+        {cursor(), [filename()]}.
 truncate(Dir, Cur, SegId, SegPosition, DeleteSegIdList, BackupDir) ->
   flush_close(Cur),
   DeleteList = lists:filter(fun(SegIdX) -> SegIdX > SegId end, DeleteSegIdList),
