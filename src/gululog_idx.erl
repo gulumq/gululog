@@ -13,7 +13,7 @@
         , switch_append/4     %% switch then append
         , delete_oldest_seg/2 %% Delete oldest segment from index
         , delete_from_cache/2 %% Delete given log entry from index cache
-        , truncate/5          %% Truncate after given logid
+        , truncate/5          %% Truncate cache and file from the given logid (inclusive)
         ]).
 
 %% APIs for readers (public access)
@@ -240,28 +240,21 @@ delete_from_cache(Tid, LogId) ->
 %% @End
 -spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
   {index(), [filename()]}.
-truncate(Dir, #idx{tid = Tid} = Idx, SegId, LogId, BackupDir) ->
-  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _) = EtsEntry) when LogIdX > LogId -> EtsEntry end),
-  case EtsEntryList = ets:select(Tid, Ms) of
-    [] ->
-      {Idx, []};
-    _ ->
-      [ets:delete(Tid, LogIdX) || {LogIdX, _} <- EtsEntryList],
-      {TruncateList, DeleteList} =
-        lists:partition(fun(?ETS_ENTRY(SegIdX, _, _)) -> SegIdX == SegId end, EtsEntryList),
-      %% close writer fd
-      flush_close(Idx),
-      %% delete idx file for > segid
-      DeleteResult = truncate_delete_do(DeleteList, Dir, BackupDir),
-      %% truncate idx file for = segid
-      TruncateResult =
-        case TruncateList of
-          []-> [];
-          _ -> truncate_truncate_do(Dir, SegId, LogId, BackupDir)
-      end,
-      %% re-open writer fd
-      {init(Dir), DeleteResult ++ TruncateResult}
-  end.
+truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _) = EtsEntry) when LogIdX >= LogId -> EtsEntry end),
+  [_ | _] = EtsEntryList = ets:select(Tid, Ms),
+  lists:map(fun(?ETS_ENTRY(_, LogIdX, _)) -> ets:delete(Tid, LogIdX) end, EtsEntryList),
+  DeleteList = lists:filter(fun(?ETS_ENTRY(SegIdX, _, _)) -> SegIdX > SegId end, EtsEntryList),
+  %% close writer fd
+  file_sync_close(Fd),
+  %% delete idx file for > segid
+  DeleteResult = truncate_delete_do(DeleteList, Dir, BackupDir),
+  %% truncate idx file for = segid
+  TruncateResult = truncate_truncate_do(Dir, SegId, LogId, BackupDir),
+  %% re-open writer fd
+  [_ | _] = NewIndexFiles = wildcard_reverse(Dir),
+  {NewVersion, NewWriterFd} = open_writer_fd(false, hd(NewIndexFiles)),
+  {Idx#idx{version = NewVersion, fd = NewWriterFd}, DeleteResult ++ TruncateResult}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
@@ -402,7 +395,7 @@ truncate_delete_do(DeleteList, Dir, BackupDir) ->
   [filename()].
 truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = gululog_name:mk_idx_name(Dir, SegId),
-  IdxPosition = get_position_in_index_file(IdxFile, LogId + 1),
+  IdxPosition = get_position_in_index_file(IdxFile, LogId),
   gululog_repair:maybe_truncate_file(IdxFile, IdxPosition, BackupDir),
   [IdxFile].
 
@@ -453,8 +446,7 @@ gululog_idx_test_() ->
          LogId1 = InitLogId + 10,
          {SegId1, _} = locate("./", Idx12, LogId1),
          {Idx13, Truncated1} = truncate("./", Idx12, SegId1, LogId1, undefined),
-         ?assertEqual([], Truncated1),
-         ?assertEqual(Idx13, Idx12),
+         ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated1),
          %% 2nd truncate
          LogId2 = InitLogId + 9,
          {SegId2, _} = locate("./", Idx13, LogId2),
@@ -466,8 +458,10 @@ gululog_idx_test_() ->
          LogId3 = InitLogId + 6,
          {SegId3, _} = locate("./", Idx14, LogId3),
          {Idx15, Truncated3} = truncate("./", Idx14, SegId3, LogId3, "./backup_delete"),
-         ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated3),
-         ?assertEqual([gululog_name:mk_idx_name("./backup_delete", 7)],
+         ?assertEqual([gululog_name:mk_idx_name("./", 5),
+                       gululog_name:mk_idx_name("./", 7)], lists:sort(Truncated3)),
+         ?assertEqual([gululog_name:mk_idx_name("./backup_delete", 7),
+                       gululog_name:mk_idx_name("./backup_delete", 5)],
                       gululog_name:wildcard_idx_name_reversed("./backup_delete")),
          %% 4 truncate
          LogId4 = InitLogId + 3,
@@ -478,8 +472,7 @@ gululog_idx_test_() ->
                       lists:sort(Truncated4)),
          Expect2 = [{0, {0, 10}},
                     {1, {0, 20}},
-                    {2, {0, 30}},
-                    {3, {0, 40}}],
+                    {2, {0, 30}}],
          EtsTable2 = Idx16#idx.tid,
          ?assertEqual(Expect2, ets:tab2list(EtsTable2)),
          %% re-init

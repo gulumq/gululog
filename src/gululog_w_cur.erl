@@ -108,18 +108,11 @@ switch_append(Dir, OldCursor, LogId, Header, Body) ->
 %% @end
 -spec truncate(dirname(), cursor(), segid(), position(), [segid()], ?undef | dirname()) ->
   {cursor(), [filename()]}.
-truncate(_Dir, Cur, _SegId, _SegPosition, [], _BackupDir) ->
-  {Cur, []};
 truncate(Dir, Cur, SegId, SegPosition, DeleteSegIdList, BackupDir) ->
   flush_close(Cur),
-  {TruncateList, DeleteList} =
-    lists:partition(fun(X) -> X == SegId end, DeleteSegIdList),
+  DeleteList = lists:filter(fun(SegIdX) -> SegIdX > SegId end, DeleteSegIdList),
   DeleteResult = truncate_delete_do(Dir, DeleteList, BackupDir),
-  TruncateResult =
-    case TruncateList of
-      [] -> [];
-      _  -> truncate_truncate_do(Dir, SegId, SegPosition, BackupDir)
-  end,
+  TruncateResult = truncate_truncate_do(Dir, SegId, SegPosition, BackupDir),
   {open(Dir), DeleteResult ++ TruncateResult}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
