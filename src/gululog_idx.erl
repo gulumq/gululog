@@ -257,8 +257,6 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   FileOpList1 = truncate_delete_do(DeleteSegIdList0, Dir, BackupDir),
   %% truncate idx file for = segid
   FileOpList2 = truncate_truncate_do(Dir, SegIdToTruncate, LogId, BackupDir),
-  %% cleanup cache
-  Tid = truncate_cache(Tid, LogId),
   NewIdx =
     case LogId =:= 0 of
       true ->
@@ -266,12 +264,14 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
         ok = close_cache(Tid),
         init(Dir);
       false ->
+        NewTid = truncate_cache(Tid, LogId),
         {NewSegId, _} = locate_in_cache(Tid, LogId - 1),
         FileName = gululog_name:mk_idx_name(Dir, NewSegId),
         {Version, NewFd} = open_writer_fd(false, FileName),
         Idx#idx{ version = Version
                , fd      = NewFd
                , segid   = NewSegId
+               , tid     = NewTid
                }
     end,
   {NewIdx, FileOpList1 ++ FileOpList2}.
@@ -281,7 +281,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
 %% @private Truncate cache, from the given logid (inclusive).
 -spec truncate_cache(cache(), logid()) -> cache().
 truncate_cache(Tid, LogId) ->
-  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _)) -> LogIdX =:= LogId end),
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _)) -> LogIdX >= LogId end),
   _ = ets:select_delete(Tid, Ms),
   Tid.
 
