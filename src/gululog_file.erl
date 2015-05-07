@@ -72,6 +72,62 @@ backup_filename(SourceName, BackupDir) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+move_test_() ->
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "move-test"),
+  _ = file:del_dir(Dir),
+  ok = filelib:ensure_dir(filename:join(Dir, "foo")),
+  SegId = 1,
+  BackupDir = filename:join(Dir, "backup"),
+  IdxFile = gululog_name:mk_idx_name(Dir, SegId),
+  SegFile = gululog_name:mk_seg_name(Dir, SegId),
+  BackupIdxFile = gululog_name:mk_idx_name(BackupDir, SegId),
+  BackupSegFile = gululog_name:mk_seg_name(BackupDir, SegId),
+  ok = file:write_file(IdxFile, <<"idx">>, [binary]),
+  ok = file:write_file(SegFile, <<"seg">>, [binary]),
+  [ { "move idx file"
+    , fun() ->
+        _ = remove_file(IdxFile, BackupDir),
+        ?assertEqual({ok, <<"idx">>}, file:read_file(BackupIdxFile)),
+        ?assertEqual(false, filelib:is_file(IdxFile))
+      end
+    }
+  , { "move seg file"
+    , fun() ->
+        _ = remove_file(SegFile, ?undef),
+        ?assertEqual(false, filelib:is_file(BackupSegFile)),
+        ?assertEqual(false, filelib:is_file(SegFile))
+      end
+    }
+  ].
+
+truncate_test_() ->
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "truncate-test"),
+  _ = file:del_dir(Dir),
+  ok = filelib:ensure_dir(filename:join(Dir, "foo")),
+  SegId = 1,
+  BackupDir = filename:join(Dir, "backup"),
+  IdxFile = gululog_name:mk_idx_name(Dir, SegId),
+  SegFile = gululog_name:mk_seg_name(Dir, SegId),
+  BackupIdxFile = gululog_name:mk_idx_name(BackupDir, SegId),
+  ok = file:write_file(IdxFile, <<"0123456789">>, [binary]),
+  ok = file:write_file(SegFile, <<"0123456789">>, [binary]),
+  [ { "truncate idx file"
+    , fun() ->
+        true = maybe_truncate_file(IdxFile, 1, BackupDir),
+        ?assertEqual({ok, <<"0">>}, file:read_file(IdxFile)),
+        ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupIdxFile))
+      end
+    }
+  , { "truncate seg file"
+    , fun() ->
+        false = maybe_truncate_file(SegFile, 10, BackupDir),
+        ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile))
+      end
+    }
+  ].
+
 -endif.
 
 %%%_* Emacs ====================================================================

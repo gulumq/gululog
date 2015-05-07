@@ -244,7 +244,9 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _) = EtsEntry) when LogIdX >= LogId -> EtsEntry end),
   [_ | _] = EtsEntryList = ets:select(Tid, Ms),
   lists:map(fun(?ETS_ENTRY(_, LogIdX, _)) -> ets:delete(Tid, LogIdX) end, EtsEntryList),
-  DeleteList = lists:filter(fun(?ETS_ENTRY(SegIdX, _, _)) -> SegIdX > SegId end, EtsEntryList),
+  DeleteList = lists:usort(lists:filtermap(fun(?ETS_ENTRY(SegIdX, _, _)) ->
+                                             SegIdX > SegId
+                                           end, EtsEntryList)),
   %% close writer fd
   file_sync_close(Fd),
   %% delete idx file for > segid
@@ -254,7 +256,13 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   %% re-open writer fd
   [_ | _] = NewIndexFiles = wildcard_reverse(Dir),
   {NewVersion, NewWriterFd} = open_writer_fd(false, hd(NewIndexFiles)),
-  {Idx#idx{version = NewVersion, fd = NewWriterFd}, DeleteResult ++ TruncateResult}.
+  NewSegId =
+    case LogId of
+      0 -> 0;
+      _ -> {NewSegIdT, _} = locate_in_cache(Tid, LogId - 1), NewSegIdT
+  end,
+  {Idx#idx{version = NewVersion, fd = NewWriterFd, segid = NewSegId},
+   DeleteResult ++ TruncateResult}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
@@ -439,6 +447,7 @@ gululog_idx_test_() ->
          LogId1 = InitLogId + 10,
          {SegId1, _} = locate("./", Idx12, LogId1),
          {Idx13, Truncated1} = truncate("./", Idx12, SegId1, LogId1, undefined),
+         ?assertEqual(7, Idx13#idx.segid),
          ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated1),
          %% 2nd truncate
          LogId2 = InitLogId + 9,
@@ -447,15 +456,20 @@ gululog_idx_test_() ->
          ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated2),
          ?assertEqual([gululog_name:mk_idx_name("./backup/", 7)],
                       gululog_name:wildcard_idx_name_reversed("./backup")),
+         ?assertEqual(7, Idx14#idx.segid),
+         %%
+         LogIdone = InitLogId + 7,
+         {SegIdone, _} = locate("./", Idx14, LogIdone),
+         {Idxone,   _} = truncate("./", Idx14, SegIdone, LogIdone, undefined),
+         ?assertEqual(5, Idxone#idx.segid),
          %% 3rd truncate
          LogId3 = InitLogId + 6,
-         {SegId3, _} = locate("./", Idx14, LogId3),
-         {Idx15, Truncated3} = truncate("./", Idx14, SegId3, LogId3, "./backup_delete"),
-         ?assertEqual([gululog_name:mk_idx_name("./", 5),
-                       gululog_name:mk_idx_name("./", 7)], lists:sort(Truncated3)),
-         ?assertEqual([gululog_name:mk_idx_name("./backup_delete", 7),
-                       gululog_name:mk_idx_name("./backup_delete", 5)],
+         {SegId3, _} = locate("./", Idxone, LogId3),
+         {Idx15, Truncated3} = truncate("./", Idxone, SegId3, LogId3, "./backup_delete"),
+         ?assertEqual([gululog_name:mk_idx_name("./", 5)], lists:sort(Truncated3)),
+         ?assertEqual([gululog_name:mk_idx_name("./backup_delete", 5)],
                       gululog_name:wildcard_idx_name_reversed("./backup_delete")),
+         ?assertEqual(5, Idx15#idx.segid),
          %% 4 truncate
          LogId4 = InitLogId + 3,
          {Segid4, _} = locate("./", Idx15, LogId4),
@@ -463,16 +477,22 @@ gululog_idx_test_() ->
          ?assertEqual([gululog_name:mk_idx_name("./", 0),
                        gululog_name:mk_idx_name("./", 5)],
                       lists:sort(Truncated4)),
+         ?assertEqual(0, Idx16#idx.segid),
          Expect2 = [{0, {0, 10}},
                     {1, {0, 20}},
                     {2, {0, 30}}],
          EtsTable2 = Idx16#idx.tid,
          ?assertEqual(Expect2, ets:tab2list(EtsTable2)),
+         %% 5 truncate
+         LogId5 = InitLogId,
+         {SegId5, _} = locate("./", Idx16, LogId5),
+         {Idx17, _}  = truncate("./", Idx16, SegId5, LogId5, undefined),
+         ?assertEqual(0, Idx17#idx.segid),
          %% re-init
-         flush_close(Idx16),
+         flush_close(Idx17),
          NewIdx = init("./"),
          NewEtsTable = NewIdx#idx.tid,
-         ?assertEqual(Expect2, ets:tab2list(NewEtsTable)),
+         ?assertEqual([], ets:tab2list(NewEtsTable)),
          flush_close(NewIdx),
          [file:delete(X) || X <- gululog_name:wildcard_idx_name_reversed("./")
                               ++ gululog_name:wildcard_seg_name_reversed("./")],
