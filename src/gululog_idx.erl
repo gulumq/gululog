@@ -420,7 +420,7 @@ gululog_idx_test_() ->
          [file:delete(X) || X <- gululog_name:wildcard_idx_name_reversed("./")
                               ++ gululog_name:wildcard_seg_name_reversed("./")],
          Idx1 = init("./"),
-         InitLogId = get_next_logid(Idx1),
+         InitLogId = 0,
          Idx2 = append(Idx1, InitLogId + 0, 10),
          Idx3 = append(Idx2, InitLogId + 1, 20),
          Idx4 = append(Idx3, InitLogId + 2, 30),
@@ -454,8 +454,10 @@ gululog_idx_test_() ->
          %% 2nd truncate
          LogId2 = InitLogId + 9,
          {SegId2, _} = locate("./", Idx13, LogId2),
-         {Idx14, Truncated2} = truncate("./", Idx13, SegId2, LogId2, undefined),
+         {Idx14, Truncated2} = truncate("./", Idx13, SegId2, LogId2, "./backup/"),
          ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated2),
+         ?assertEqual([gululog_name:mk_idx_name("./backup/", 7)],
+                       gululog_name:wildcard_idx_name_reversed("./backup")),
          %% 3rd truncate
          LogId3 = InitLogId + 3,
          {Segid3, _} = locate("./", Idx14, LogId3),
@@ -477,17 +479,11 @@ gululog_idx_test_() ->
          ?assertEqual(Expect2, ets:tab2list(NewEtsTable)),
          flush_close(NewIdx),
          [file:delete(X) || X <- gululog_name:wildcard_idx_name_reversed("./")
-                              ++ gululog_name:wildcard_seg_name_reversed("./")]
+                              ++ gululog_name:wildcard_seg_name_reversed("./")],
+         [file:delete(X) || X <- gululog_name:wildcard_idx_name_reversed("./backup")],
+         ok
        end}
   ].
-
-get_next_logid(Idx) ->
-  case get_latest_logid(Idx) of
-    'false' ->
-      0;
-    LogId ->
-      LogId + 1
-  end.
 
 -endif.
 
