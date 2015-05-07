@@ -21,8 +21,9 @@
 %% @doc Repair log integrity in the given dir.
 %% There is no aotomicity when switching .idx and .seg files to new segments,
 %% this function is to repair the data integrity in the given directory.
-%% 1. move the un-paired ones from the log directory to backup directory.
-%% 2. resect the corrupted segmentfile (file before resection is backed up).
+%% 1. remove (maybe backup) unpaired .idx and .seg fiels.
+%% 2. resect the corrupted .idx and .seg tails
+%%    (files are backed up before resection if backup dir is given).
 %% @end
 -spec repair_dir(dirname()) -> {ok, [{tag(), filename()}]} | no_return().
 repair_dir(Dir) -> repair_dir(Dir, ?undef).
@@ -48,7 +49,7 @@ repair_dir(Dir, BackupDir) ->
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Repair log integrity in the given dir.
-%% move unpaired index and segment files to backup dir.
+%% remove (backup if backup dir is given) unpaired index and segment files
 %% @end
 -spec repair_dir([filename()], [filename()], ?undef | dirname()) ->
         [{tag(), filename()}].
@@ -125,7 +126,7 @@ integral_pos(SegId, IndexCache, IdxFile, LogId, RCursor0) ->
   case try_read_log(RCursor1) of
     {ok, RCursor2} ->
       %% no corruption, return current logid being scaned
-      IdxPos = gululog_idx:get_next_position_in_index_file(IdxFile, LogId),
+      IdxPos = gululog_idx:get_position_in_index_file(IdxFile, LogId + 1),
       SegPos = gululog_r_cur:current_position(RCursor2),
       ok = gululog_r_cur:close(RCursor2),
       {IdxPos, SegPos};

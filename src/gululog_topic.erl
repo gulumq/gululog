@@ -6,6 +6,7 @@
         , append/3
         , close/1
         , force_switch/1
+        , truncate_inclusive/3
         ]).
 
 -export_type([topic/0]).
@@ -42,7 +43,7 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Initialize topic from the given directory.
-%% Assuming the directory has integrity log files ensured by
+%% Assuming the directory has integrity in log files ensured by
 %% gululog_repair:repair_dir/2
 %% @end
 -spec init(dirname(), options()) -> topic().
@@ -107,6 +108,24 @@ force_switch(#topic{ dir   = Dir
   Topic#topic{ idx = NewIdx
              , cur = NewCur
              }.
+
+%% @doc Truncate the topic from (including) the given logid.
+-spec truncate_inclusive(topic(), logid(), ?undef | dirname()) -> {topic(), [filename()]}.
+truncate_inclusive(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
+  {SegId, SegPosition} = gululog_idx:locate(Dir, Idx, LogId),
+  %% delete the truncated cache entries
+  %% close writer fd
+  %% delete(maybe backup) the files > SegId
+  %% truncate the file = SegId
+  %% re-open the writer fd
+  {NewIdx, DeletedIdxFiles} = gululog_idx:truncate(Idx, SegId, LogId, BackupDir),
+  %% close writer fd
+  %% delete(maybe backup) the files > SegId
+  %% truncate the file = SegId
+  %% re-open the writer fd
+  {NewCur, DeletedSegFiles} = gululog_w_cur:truncate(Cur, SegId, SegPosition, BackupDir),
+  NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
+  {NewTopic, DeletedIdxFiles ++ DeletedSegFiles}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
