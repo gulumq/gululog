@@ -88,6 +88,7 @@ t_truncate_inclusive({'end', _Config}) ->
   ok;
 t_truncate_inclusive(Config) when is_list(Config) ->
   Dir = ?config(dir),
+  BackupDir = filename:join(Dir, "backup"),
   T1 = gululog_topic:init(Dir, []),
   T2 = gululog_topic:append(T1, <<"key">>, <<"value">>),
   T3 = gululog_topic:append(T2, <<"key">>, <<"value">>),
@@ -107,20 +108,29 @@ t_truncate_inclusive(Config) when is_list(Config) ->
   {T14, Result2} = gululog_topic:truncate_inclusive(T13, 8, undefined),
   ?assertEqual([], Result2),
   %% 3rd truncate
-  {T15, Result3} = gululog_topic:truncate_inclusive(T14, 7, undefined),
+  {T15, Result3} = gululog_topic:truncate_inclusive(T14, 7, BackupDir),
   ?assertEqual([gululog_name:mk_idx_name(Dir, 6),
                 gululog_name:mk_seg_name(Dir, 6)], Result3),
   {T16, Result4} = gululog_topic:truncate_inclusive(T15, 6, undefined),
   ?assertEqual([gululog_name:mk_idx_name(Dir, 6),
                 gululog_name:mk_seg_name(Dir, 6)], Result4),
-  {_T17, Result5} = gululog_topic:truncate_inclusive(T16, 3, undefined),
+  {T17, Result5} = gululog_topic:truncate_inclusive(T16, 5, undefined),
+  ?assertEqual([gululog_name:mk_idx_name(Dir, 6),
+                gululog_name:mk_seg_name(Dir, 6)], Result5),
+  {_T18, Result6} = gululog_topic:truncate_inclusive(T17, 3, BackupDir),
   Expect = [gululog_name:mk_idx_name(Dir, 0),
             gululog_name:mk_seg_name(Dir, 0),
             gululog_name:mk_idx_name(Dir, 5),
-            gululog_name:mk_seg_name(Dir, 5),
-            gululog_name:mk_idx_name(Dir, 6),
-            gululog_name:mk_seg_name(Dir, 6)],
-  ?assertEqual(Expect, lists:sort(Result5)).
+            gululog_name:mk_seg_name(Dir, 5)],
+  ?assertEqual(Expect, lists:sort(Result6)),
+  Expect1 = [gululog_name:mk_idx_name(BackupDir, 0),
+             gululog_name:mk_seg_name(BackupDir, 0),
+             gululog_name:mk_idx_name(BackupDir, 5),
+             gululog_name:mk_seg_name(BackupDir, 5),
+             gululog_name:mk_idx_name(BackupDir, 6),
+             gululog_name:mk_seg_name(BackupDir, 6)],
+  ?assertEqual(Expect1, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
+                                   ++ gululog_name:wildcard_seg_name_reversed(BackupDir))).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

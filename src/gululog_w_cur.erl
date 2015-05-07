@@ -112,10 +112,14 @@ truncate(_Dir, Cur, _SegId, _SegPosition, [], _BackupDir) ->
   {Cur, []};
 truncate(Dir, Cur, SegId, SegPosition, DeleteSegIdList, BackupDir) ->
   flush_close(Cur),
-  {_TruncateList, DeleteList} =
+  {TruncateList, DeleteList} =
     lists:partition(fun(X) -> X == SegId end, DeleteSegIdList),
   DeleteResult = truncate_delete_do(Dir, DeleteList, BackupDir),
-  TruncateResult = truncate_truncate_do(Dir, SegId, SegPosition, BackupDir),
+  TruncateResult =
+    case TruncateList of
+      [] -> [];
+      _  -> truncate_truncate_do(Dir, SegId, SegPosition, BackupDir)
+  end,
   {open(Dir), DeleteResult ++ TruncateResult}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
@@ -152,7 +156,7 @@ truncate_delete_do(Dir, DeleteList, BackupDir) ->
       FileName = gululog_name:mk_seg_name(Dir, SegIdX),
       remove_file(FileName, BackupDir),
       FileName
-   end || SegIdX <- DeleteList].
+   end || SegIdX <- lists:usort(DeleteList)].
 
 %% maybe need move it to util module
 remove_file(FileName, ?undef) ->
