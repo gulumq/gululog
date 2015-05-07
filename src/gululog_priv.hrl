@@ -23,11 +23,12 @@
 -define(DOT_SEG, ".seg").
 -define(undef, undefined).
 
--define(REPAIR_BACKEDUP, backedup).
--define(REPAIR_RESECTED, resected).
--define(REPAIR_DELETED, deleted).
+-define(OP_BACKEDUP,  backedup).
+-define(OP_TRUNCATED, truncated).
+-define(OP_DELETED,   deleted).
 
--type repair_tag() :: ?REPAIR_BACKEDUP | ?REPAIR_RESECTED | ?REPAIR_DELETED.
+-type file_op_tag() :: ?OP_BACKEDUP | ?OP_TRUNCATED | ?OP_DELETED.
+-type file_op() :: {file_op_tag(), filename()}.
 
 -define(FILE_TYPE_IDX, idx).
 -define(FILE_TYPE_SEG, seg).

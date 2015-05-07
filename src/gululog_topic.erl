@@ -6,7 +6,7 @@
         , append/3
         , close/1
         , force_switch/1
-        , truncate_inclusive/3
+        , truncate/3
         ]).
 
 -export_type([topic/0]).
@@ -55,12 +55,13 @@ init(Dir, Options) ->
                 false -> 0;
                 N     -> N + 1
               end,
-  #topic{ dir   = Dir
-        , idx   = Idx
-        , cur   = Cur
-        , segMB = SegMB
-        , logid = NextLogId
-        }.
+  maybe_switch_to_new_version(
+    #topic{ dir   = Dir
+          , idx   = Idx
+          , cur   = Cur
+          , segMB = SegMB
+          , logid = NextLogId
+          }).
 
 %% @doc Append a new log entry to the given topic.
 %% Index and segments are switched to new files in case the segment file has
@@ -110,29 +111,25 @@ force_switch(#topic{ dir   = Dir
              }.
 
 %% @doc Truncate the topic from (including) the given logid.
--spec truncate_inclusive(topic(), logid(), ?undef | dirname()) -> {topic(), [filename()]}.
-truncate_inclusive(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
+-spec truncate(topic(), logid(), ?undef | dirname()) -> {topic(), [file_op()]}.
+truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
   case gululog_idx:locate(Dir, Idx, LogId) of
     false ->
       {Topic, []};
-    {SegId, SegPosition} ->
-      %% delete the truncated cache entries
-      %% close writer fd
-      %% delete(maybe backup) the files > SegId
-      %% truncate the file = SegId
-      %% re-open the writer fd
-      {NewIdx, DeletedIdxFiles} = gululog_idx:truncate(Dir, Idx, SegId, LogId, BackupDir),
-      %% close writer fd
-      %% delete(maybe backup) the files > SegId
-      %% truncate the file = SegId
-      %% re-open the writer fd
-      DeleteSegIdList = [gululog_name:filename_to_segid(DeletedIdxFilesX) || DeletedIdxFilesX <- DeletedIdxFiles],
-      {NewCur, DeletedSegFiles} = gululog_w_cur:truncate(Dir, Cur, SegId, SegPosition, DeleteSegIdList, BackupDir),
+    {SegId, Position} ->
+      {NewIdx, IdxFileOpList} =
+        gululog_idx:truncate(Dir, Idx, SegId, LogId, BackupDir),
+      {NewCur, SegFileOpList} =
+        gululog_w_cur:truncate(Dir, Cur, SegId, Position, BackupDir),
       NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
-      {NewTopic, DeletedIdxFiles ++ DeletedSegFiles}
+      {maybe_switch_to_new_version(NewTopic),
+       IdxFileOpList ++ SegFileOpList}
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
+
+%% @private Nothing to do so far.
+maybe_switch_to_new_version(Topic) -> Topic.
 
 %% @private Get value from key-value list, return default if not found
 -spec keyget(Key::term(), [{Key::term(), Value::term()}], Default::term()) -> Value::term().

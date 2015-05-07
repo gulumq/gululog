@@ -14,7 +14,6 @@
 
 -type cache() :: gululog_idx:cache().
 -type r_cursor() :: gululog_r_cur:cursor().
--type tag() :: repair_tag().
 
 %%%*_ API FUNCTIONS ============================================================
 
@@ -22,14 +21,14 @@
 %% There is no aotomicity when switching .idx and .seg files to new segments,
 %% this function is to repair the data integrity in the given directory.
 %% 1. remove (maybe backup) unpaired .idx and .seg fiels.
-%% 2. resect the corrupted .idx and .seg tails
-%%    (files are backed up before resection if backup dir is given).
+%% 2. truncate the corrupted .idx and .seg tails
+%%    (files are backed up before truncate if backup dir is given).
 %% @end
--spec repair_dir(dirname()) -> {ok, [{tag(), filename()}]} | no_return().
+-spec repair_dir(dirname()) -> {ok, [{file_op()}]} | no_return().
 repair_dir(Dir) -> repair_dir(Dir, ?undef).
 
 -spec repair_dir(dirname(), ?undef | dirname()) ->
-        {ok, [{tag(), filename()}]} | no_return().
+        {ok, [{file_op()}]} | no_return().
 repair_dir(Dir, BackupDir) ->
   case filelib:is_dir(Dir) of
     true ->
@@ -51,8 +50,7 @@ repair_dir(Dir, BackupDir) ->
 %% @private Repair log integrity in the given dir.
 %% remove (backup if backup dir is given) unpaired index and segment files
 %% @end
--spec repair_dir([filename()], [filename()], ?undef | dirname()) ->
-        [{tag(), filename()}].
+-spec repair_dir([filename()], [filename()], ?undef | dirname()) -> [{file_op()}].
 repair_dir(IdxFiles, SegFiles, BackupDir) ->
   ToSegIdFun = fun gululog_name:filename_to_segid/1,
   IdxSegIds = sets:from_list(lists:map(ToSegIdFun, IdxFiles)),
@@ -72,11 +70,11 @@ repair_dir(IdxFiles, SegFiles, BackupDir) ->
 
 %% @private Repair segment file.
 %% Assuming that the index file is never corrupted.
-%% In case there is a resection of corrupted segment tail,
-%% an resection is done for the index file as well.
+%% In case there is a truncate of corrupted segment tail,
+%% an truncation is done for the index file as well.
 %% @end
 -spec repair_seg([filename()], [filename()], dirname(), ?undef | dirname()) ->
-        [{tag(), filename()}].
+        [{file_op(), filename()}].
 repair_seg([], [], _Dir, _BackupDir) -> [];
 repair_seg([IdxFile | _], [SegFile | _], Dir, BackupDir) ->
   IndexCache = gululog_idx:init_cache([IdxFile]),
@@ -98,8 +96,8 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
     {IdxPos, SegPos} ->
       IsIdxRepaired = gululog_file:maybe_truncate(IdxFile, IdxPos, BackupDir),
       IsSegRepaired = gululog_file:maybe_truncate(SegFile, SegPos, BackupDir),
-      [{?REPAIR_RESECTED, IdxFile} || IsIdxRepaired] ++
-      [{?REPAIR_RESECTED, SegFile} || IsSegRepaired]
+      [{?OP_TRUNCATED, IdxFile} || IsIdxRepaired] ++
+      [{?OP_TRUNCATED, SegFile} || IsSegRepaired]
   end.
 
 %% @private Scan from the latest log entry until integrity is found.

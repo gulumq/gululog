@@ -15,15 +15,15 @@
 
 %% @doc Copy the file to another name and delete the source file.
 %% @end
--spec delete(filename(), ?undef | dirname()) -> ok.
+-spec delete(filename(), ?undef | dirname()) -> file_op().
 delete(FileName, ?undef) ->
   ok = file:delete(FileName),
-  {?REPAIR_DELETED, FileName};
+  {?OP_DELETED, FileName};
 delete(FileName, TargetDir) ->
   TargetFile = backup_filename(FileName, TargetDir),
   ok = filelib:ensure_dir(TargetFile),
   ok = file:rename(FileName, TargetFile),
-  {?REPAIR_BACKEDUP, FileName}.
+  {?OP_BACKEDUP, FileName}.
 
 %% @doc Maybe backup the original file, then truncate at the given position.
 %% @end
