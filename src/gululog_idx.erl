@@ -386,11 +386,12 @@ file_sync_close(Fd) ->
 -spec truncate_delete_do([{logid(), {segid(), position()}}], dirname(), ?undef | dirname()) ->
   [filename()].
 truncate_delete_do(DeleteList, Dir, BackupDir) ->
+  SegIdList = lists:usort([SegIdX || {_, {SegIdX, _}} <- DeleteList]),
   [begin
      FileName = gululog_name:mk_idx_name(Dir, SegIdX),
      remove_file(FileName, BackupDir),
      FileName
-   end || {_LogIdX, {SegIdX, _}} <- DeleteList].
+   end || SegIdX <- SegIdList].
 
 %% @private Truncate index file.
 -spec truncate_truncate_do(dirname(), segid(), logid(), ?undef | dirname()) ->
@@ -409,6 +410,86 @@ remove_file(FileName, BackupDir) ->
   ok = file:delete(FileName).
 
 %%%*_ TESTS ====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+gululog_idx_test_() ->
+  [ {"truncate/5",
+      fun() ->
+         [file:delete(X) || X <- gululog_name:wildcard_idx_name_reversed("./")
+                              ++ gululog_name:wildcard_seg_name_reversed("./")],
+         Idx1 = init("./"),
+         InitLogId = get_next_logid(Idx1),
+         Idx2 = append(Idx1, InitLogId + 0, 10),
+         Idx3 = append(Idx2, InitLogId + 1, 20),
+         Idx4 = append(Idx3, InitLogId + 2, 30),
+         Idx5 = append(Idx4, InitLogId + 3, 40),
+         Idx6 = append(Idx5, InitLogId + 4, 50),
+         Idx7 = switch_append("./", Idx6, InitLogId + 5, 60),
+         Idx8 = append(Idx7, InitLogId + 6, 70),
+         Idx9 = switch_append("./", Idx8, InitLogId + 7, 80),
+         Idx10 = append(Idx9, InitLogId + 8, 90),
+         Idx11 = append(Idx10, InitLogId + 9, 100),
+         Idx12 = append(Idx11, InitLogId + 10, 110),
+         Expect1 = [{0, {0, 10}},
+                    {1, {0, 20}},
+                    {2, {0, 30}},
+                    {3, {0, 40}},
+                    {4, {0, 50}},
+                    {5, {5, 60}},
+                    {6, {5, 70}},
+                    {7, {7, 80}},
+                    {8, {7, 90}},
+                    {9, {7, 100}},
+                    {10, {7, 110}}],
+         EtsTable1 = Idx12#idx.tid,
+         ?assertEqual(Expect1, ets:tab2list(EtsTable1)),
+         %% 1st truncate
+         LogId1 = InitLogId + 10,
+         {SegId1, _} = locate("./", Idx12, LogId1),
+         {Idx13, Truncated1} = truncate("./", Idx12, SegId1, LogId1, undefined),
+         ?assertEqual([], Truncated1),
+         ?assertEqual(Idx13, Idx12),
+         %% 2nd truncate
+         LogId2 = InitLogId + 9,
+         {SegId2, _} = locate("./", Idx13, LogId2),
+         {Idx14, Truncated2} = truncate("./", Idx13, SegId2, LogId2, undefined),
+         ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated2),
+         %% 3rd truncate
+         LogId3 = InitLogId + 3,
+         {Segid3, _} = locate("./", Idx14, LogId3),
+         {Idx15, Truncated3} = truncate("./", Idx14, Segid3, LogId3, undefined),
+         ?assertEqual([gululog_name:mk_idx_name("./", 0),
+                       gululog_name:mk_idx_name("./", 5),
+                       gululog_name:mk_idx_name("./", 7)],
+                      lists:sort(Truncated3)),
+         Expect2 = [{0, {0, 10}},
+                    {1, {0, 20}},
+                    {2, {0, 30}},
+                    {3, {0, 40}}],
+         EtsTable2 = Idx15#idx.tid,
+         ?assertEqual(Expect2, ets:tab2list(EtsTable2)),
+         %% re-init
+         flush_close(Idx15),
+         NewIdx = init("./"),
+         NewEtsTable = NewIdx#idx.tid,
+         ?assertEqual(Expect2, ets:tab2list(NewEtsTable)),
+         flush_close(NewIdx),
+         [file:delete(X) || X <- gululog_name:wildcard_idx_name_reversed("./")
+                              ++ gululog_name:wildcard_seg_name_reversed("./")]
+       end}
+  ].
+
+get_next_logid(Idx) ->
+  case get_latest_logid(Idx) of
+    'false' ->
+      0;
+    LogId ->
+      LogId + 1
+  end.
+
+-endif.
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
