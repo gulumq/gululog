@@ -17,7 +17,7 @@
 -export([ t_basic_flow/1
         , t_init_from_existing/1
         , t_scan_file_to_locate/1
-        , t_truncate_after/1
+        , t_truncate_inclusive/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -139,11 +139,11 @@ t_scan_file_to_locate(Config) when is_list(Config) ->
   ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
   ok.
 
-t_truncate_after({init, Config}) ->
+t_truncate_inclusive({init, Config}) ->
   Config;
-t_truncate_after({'end', _Config}) ->
+t_truncate_inclusive({'end', _Config}) ->
   ok;
-t_truncate_after(Config) when is_list(Config) ->
+t_truncate_inclusive(Config) when is_list(Config) ->
   Dir = ?config(dir),
   T1 = gululog_topic:init(Dir, []),
   T2 = gululog_topic:append(T1, <<"key">>, <<"value">>),
@@ -157,18 +157,27 @@ t_truncate_after(Config) when is_list(Config) ->
   T10 = gululog_topic:append(T9, <<"key">>, <<"value">>),
   T11 = gululog_topic:append(T10, <<"key">>, <<"value">>),
   T12 = gululog_topic:append(T11, <<"key">>, <<"value">>),
-  Idx = erlang:element(4, T12),
-  ?assertEqual({ok, []}, gululog_idx:truncate_after(Dir, Idx, 10)),
-  ?assertEqual({ok, []}, gululog_idx:truncate_after(Dir, Idx, 8)),
-  ?assertEqual({ok, [{gululog_name:mk_idx_name(Dir, 6), gululog_name:mk_seg_name(Dir, 6)}]},
-               gululog_idx:truncate_after(Dir, Idx, 7)),
-  ?assertEqual({ok, [{gululog_name:mk_idx_name(Dir, 6), gululog_name:mk_seg_name(Dir, 6)}]},
-               gululog_idx:truncate_after(Dir, Idx, 6)),
-  Expect = [{gululog_name:mk_idx_name(Dir, 0), gululog_name:mk_seg_name(Dir, 0)},
-            {gululog_name:mk_idx_name(Dir, 5), gululog_name:mk_seg_name(Dir, 5)},
-            {gululog_name:mk_idx_name(Dir, 6), gululog_name:mk_seg_name(Dir, 6)}],
-  {ok, TruncateResult} = gululog_idx:truncate_after(Dir, Idx, 3),
-  ?assertEqual(Expect, lists:sort(TruncateResult)).
+  %% 1st truncate
+  {T13, Result1} = gululog_topic:truncate_inclusive(T12, 10, undefined),
+  ?assertEqual([], Result1),
+  %% 2nd truncate
+  {T14, Result2} = gululog_topic:truncate_inclusive(T13, 8, undefined),
+  ?assertEqual([], Result2),
+  %% 3rd truncate
+  {T15, Result3} = gululog_topic:truncate_inclusive(T14, 7, undefined),
+  ?assertEqual([gululog_name:mk_idx_name(Dir, 6),
+                gululog_name:mk_seg_name(Dir, 6)], Result3),
+  {T16, Result4} = gululog_topic:truncate_inclusive(T15, 6, undefined),
+  ?assertEqual([gululog_name:mk_idx_name(Dir, 6),
+                gululog_name:mk_seg_name(Dir, 6)], Result4),
+  {T17, Result5} = gululog_topic:truncate_inclusive(T16, 3, undefined),
+  Expect = [gululog_name:mk_idx_name(Dir, 0),
+            gululog_name:mk_seg_name(Dir, 0),
+            gululog_name:mk_idx_name(Dir, 5),
+            gululog_name:mk_seg_name(Dir, 5),
+            gululog_name:mk_idx_name(Dir, 6),
+            gululog_name:mk_seg_name(Dir, 6)],
+  ?assertEqual(Expect, lists:sort(Result5)).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

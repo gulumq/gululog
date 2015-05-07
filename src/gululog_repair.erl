@@ -8,6 +8,9 @@
         , repair_dir/2
         ]).
 
+-export([ copy_file/2
+        , maybe_truncate_file/3]).
+
 %%%*_ MACROS and SPECS =========================================================
 
 -include("gululog_priv.hrl").

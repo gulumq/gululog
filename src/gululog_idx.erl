@@ -13,7 +13,7 @@
         , switch_append/4     %% switch then append
         , delete_oldest_seg/2 %% Delete oldest segment from index
         , delete_from_cache/2 %% Delete given log entry from index cache
-        , truncate_after/3    %% Truncate after given logid
+        , truncate/5          %% Truncate after given logid
         ]).
 
 %% APIs for readers (public access)
@@ -235,23 +235,28 @@ delete_from_cache(Tid, LogId) ->
   end,
   Tid.
 
-%% @doc Truncate after given logid from index and segment
-%% Return idx file and seg file for deleted or truncated
+%% @doc Truncate after given logid from cache and index file
+%% Return new index and index file for deleted or truncated
 %% @End
--spec truncate_after(dirname(), index(), logid()) -> {ok, [{filename(), filename()}]}.
-truncate_after(Dir, #idx{tid = Tid} = _Idx, LogIdToTruncate) ->
-  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogId, _) = EtsEntry) when LogId > LogIdToTruncate -> EtsEntry end),
+-spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
+  {index(), [filename()]}.
+truncate(Dir, #idx{tid = Tid} = Idx, SegId, LogId, BackupDir) ->
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _) = EtsEntry) when LogIdX > LogId -> EtsEntry end),
   case EtsEntryList = ets:select(Tid, Ms) of
     [] ->
-      {ok, []};
+      {Idx, []};
     _ ->
-      {LogIdToTruncateSegId, LogIdToTruncatePosition} = locate_in_cache(Tid, LogIdToTruncate),
-      {TruncateList, DeleteList} =
-        lists:partition(fun(?ETS_ENTRY(SegIdToTruncateX, _, _)) -> SegIdToTruncateX == LogIdToTruncateSegId end, EtsEntryList),
-      DeleteResult   = truncate_after_delete_do(DeleteList, Tid, Dir),
-      TruncateResult = truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate,
-                                                  LogIdToTruncateSegId, LogIdToTruncatePosition),
-      {ok, DeleteResult ++ TruncateResult}
+      [ets:delete(Tid, LogIdX) || {LogIdX, _} <- EtsEntryList],
+      {_TruncateList, DeleteList} =
+        lists:partition(fun(?ETS_ENTRY(SegIdX, _, _)) -> SegIdX == SegId end, EtsEntryList),
+      %% close writer fd
+      flush_close(Idx),
+      %% delete idx file for > segid
+      DeleteResult = truncate_delete_do(DeleteList, Dir, BackupDir),
+      %% truncate idx file for = segid
+      TruncateResult = truncate_truncate_do(Dir, SegId, LogId, BackupDir),
+      %% re-open writer fd
+      {init(Dir), DeleteResult ++ TruncateResult}
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
@@ -377,42 +382,31 @@ file_sync_close(Fd) ->
   ok = file:sync(Fd),
   ok = file:close(Fd).
 
-%% @private Delete index and segment files for truncate
--spec truncate_after_delete_do([{logid(), {segid(), position()}}], cache(), dirname()) ->
-  [{filename(), filename()}].
-truncate_after_delete_do([], _Tid, _Dir) ->
-  [];
-truncate_after_delete_do(DeleteList, Tid, Dir) ->
+%% @private Delete index file.
+-spec truncate_delete_do([{logid(), {segid(), position()}}], dirname(), ?undef | dirname()) ->
+  [filename()].
+truncate_delete_do(DeleteList, Dir, BackupDir) ->
   [begin
-     ets:delete(Tid, LogIdX),
-     ok = file:delete(SegFileD = gululog_name:mk_seg_name(Dir, SegIdX)),
-     ok = file:delete(IdxFileD = gululog_name:mk_idx_name(Dir, SegIdX)),
-     {IdxFileD, SegFileD}
-   end || {LogIdX, {SegIdX, _}} <- DeleteList].
+     FileName = gululog_name:mk_idx_name(Dir, SegIdX),
+     remove_file(FileName, BackupDir),
+     FileName
+   end || {_LogIdX, {SegIdX, _}} <- DeleteList].
 
-%% @private Truncate index and segment files for truncate
--spec truncate_after_truncate_do([{logid(), {segid(), position()}}],
-                                 cache(), dirname(), logid(), segid(), position()) ->
-  [{filename(), filename()}].
-truncate_after_truncate_do([], _Tid, _Dir, _LogIdToTruncate, _SegIdToTruncate, _SegPosition) ->
-  [];
-truncate_after_truncate_do(TruncateList, Tid, Dir, LogIdToTruncate, SegIdToTruncate, SegPosition) ->
-  [ets:delete(Tid, LogIdX) || {LogIdX, {_SegIdX, _}} <- TruncateList],
-  %% truncate seg file
-  SegFile = gululog_name:mk_seg_name(Dir, SegIdToTruncate),
-  {ok, FdSeg} = file:open(SegFile, [write, read, raw, binary]),
-  {ok, _NewSegPosition} = file:position(FdSeg, SegPosition),
-  file:truncate(FdSeg),
-  ok = file_sync_close(FdSeg),
-  %% truncate idx file
-  IdxFile = gululog_name:mk_idx_name(Dir, SegIdToTruncate),
-  IdxPosition = get_next_position_in_index_file(IdxFile, LogIdToTruncate),
-  {ok, FdIdx} = file:open(IdxFile, [write, read, raw, binary]),
-  {ok, _NewIdxPosition} = file:position(FdIdx, IdxPosition),
-  file:truncate(FdIdx),
-  ok = file_sync_close(FdIdx),
+%% @private Truncate index file.
+-spec truncate_truncate_do(dirname(), segid(), logid(), ?undef | dirname()) ->
+  [filename()].
+truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
+  IdxFile = gululog_name:mk_idx_name(Dir, SegId),
+  IdxPosition = get_position_in_index_file(IdxFile, LogId + 1),
+  gululog_repair:maybe_truncate_file(IdxFile, IdxPosition, BackupDir),
+  [IdxFile].
 
-  [{IdxFile, SegFile}].
+%% maybe need move it to util module
+remove_file(FileName, ?undef) ->
+  ok = file:delete(FileName);
+remove_file(FileName, BackupDir) ->
+  ok = gululog_repair:copy_file(FileName, BackupDir),
+  ok = file:delete(FileName).
 
 %%%*_ TESTS ====================================================================
 

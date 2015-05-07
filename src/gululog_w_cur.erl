@@ -13,6 +13,7 @@
         , switch/3
         , switch_append/5
         , next_log_position/1
+        , truncate/6
         ]).
 
 -export_type([cursor/0]).
@@ -102,6 +103,21 @@ switch_append(Dir, OldCursor, LogId, Header, Body) ->
   NewCursor = switch(Dir, OldCursor, LogId),
   append(NewCursor, LogId, Header, Body).
 
+%% @doc Truncate after given logid from segment file
+%% Return new writer cur and delete segment files
+%% @end
+-spec truncate(dirname(), cursor(), segid(), position(), [segid()], ?undef | dirname()) ->
+  {cursor(), [filename()]}.
+truncate(_Dir, Cur, _SegId, _SegPosition, [], _BackupDir) ->
+  {Cur, []};
+truncate(Dir, Cur, SegId, SegPosition, DeleteSegIdList, BackupDir) ->
+  flush_close(Cur),
+  {_TruncateList, DeleteList} =
+    lists:partition(fun(X) -> X == SegId end, DeleteSegIdList),
+  DeleteResult = truncate_delete_do(Dir, DeleteList, BackupDir),
+  TruncateResult = truncate_truncate_do(Dir, SegId, SegPosition, BackupDir),
+  {open(Dir), DeleteResult ++ TruncateResult}.
+
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Open a new segment file for writer.
@@ -123,6 +139,27 @@ mk_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).
 %% @end
 -spec wildcard_reverse(dirname()) -> [filename()].
 wildcard_reverse(Dir) -> gululog_name:wildcard_seg_name_reversed(Dir).
+
+%% @private Truncate segment file.
+truncate_truncate_do(Dir, SegId, SegPosition, BackupDir) ->
+  SegFile = gululog_name:mk_seg_name(Dir, SegId),
+  gululog_repair:maybe_truncate_file(SegFile, SegPosition, BackupDir),
+  [SegFile].
+
+%% %private Delete segment file.
+truncate_delete_do(Dir, DeleteList, BackupDir) ->
+  [begin
+      FileName = gululog_name:mk_seg_name(Dir, SegIdX),
+      remove_file(FileName, BackupDir),
+      FileName
+   end || SegIdX <- DeleteList].
+
+%% maybe need move it to util module
+remove_file(FileName, ?undef) ->
+  ok = file:delete(FileName);
+remove_file(FileName, BackupDir) ->
+  ok = gululog_repair:copy_file(FileName, BackupDir),
+  ok = file:delete(FileName).
 
 %%%*_ TESTS ====================================================================
 

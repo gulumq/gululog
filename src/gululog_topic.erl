@@ -112,20 +112,25 @@ force_switch(#topic{ dir   = Dir
 %% @doc Truncate the topic from (including) the given logid.
 -spec truncate_inclusive(topic(), logid(), ?undef | dirname()) -> {topic(), [filename()]}.
 truncate_inclusive(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
-  {SegId, SegPosition} = gululog_idx:locate(Dir, Idx, LogId),
-  %% delete the truncated cache entries
-  %% close writer fd
-  %% delete(maybe backup) the files > SegId
-  %% truncate the file = SegId
-  %% re-open the writer fd
-  {NewIdx, DeletedIdxFiles} = gululog_idx:truncate(Idx, SegId, LogId, BackupDir),
-  %% close writer fd
-  %% delete(maybe backup) the files > SegId
-  %% truncate the file = SegId
-  %% re-open the writer fd
-  {NewCur, DeletedSegFiles} = gululog_w_cur:truncate(Cur, SegId, SegPosition, BackupDir),
-  NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
-  {NewTopic, DeletedIdxFiles ++ DeletedSegFiles}.
+  case gululog_idx:locate(Dir, Idx, LogId) of
+    false ->
+      {Topic, []};
+    {SegId, SegPosition} ->
+      %% delete the truncated cache entries
+      %% close writer fd
+      %% delete(maybe backup) the files > SegId
+      %% truncate the file = SegId
+      %% re-open the writer fd
+      {NewIdx, DeletedIdxFiles} = gululog_idx:truncate(Dir, Idx, SegId, LogId, BackupDir),
+      %% close writer fd
+      %% delete(maybe backup) the files > SegId
+      %% truncate the file = SegId
+      %% re-open the writer fd
+      DeleteSegIdList = [gululog_name:filename_to_segid(DeletedIdxFilesX) || DeletedIdxFilesX <- DeletedIdxFiles],
+      {NewCur, DeletedSegFiles} = gululog_w_cur:truncate(Dir, Cur, SegId, SegPosition, DeleteSegIdList, BackupDir),
+      NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
+      {NewTopic, DeletedIdxFiles ++ DeletedSegFiles}
+  end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
