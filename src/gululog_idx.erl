@@ -397,7 +397,7 @@ truncate_delete_do(DeleteList, Dir, BackupDir) ->
 
   [begin
      FileName = gululog_name:mk_idx_name(Dir, SegIdX),
-     gululog_file:remove_file(FileName, BackupDir),
+     gululog_file:delete(FileName, BackupDir),
      FileName
    end || SegIdX <- DeleteList].
 
@@ -407,7 +407,7 @@ truncate_delete_do(DeleteList, Dir, BackupDir) ->
 truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = gululog_name:mk_idx_name(Dir, SegId),
   IdxPosition = get_position_in_index_file(IdxFile, LogId),
-  gululog_file:maybe_truncate_file(IdxFile, IdxPosition, BackupDir),
+  gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir),
   [IdxFile].
 
 %% @private Filtermap, R15B03 did not has this function in lists module 

@@ -67,7 +67,7 @@ repair_dir(IdxFiles, SegFiles, BackupDir) ->
       fun(SegFile) ->
         not sets:is_element(ToSegIdFun(SegFile), IdxSegIds)
       end, SegFiles),
-  lists:map(fun(FileName) -> gululog_file:remove_file(FileName, BackupDir) end,
+  lists:map(fun(FileName) -> gululog_file:delete(FileName, BackupDir) end,
             UnpairedIdxFiles ++ UnpairedSegFiles).
 
 %% @private Repair segment file.
@@ -93,11 +93,11 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
   case integral_pos(SegId, IndexCache, IdxFile, LatestLogId, RCursor) of
     bof ->
       %% the whole segment is empty or corrupted
-      [gululog_file:remove_file(IdxFile, BackupDir),
-       gululog_file:remove_file(SegFile, BackupDir)];
+      [gululog_file:delete(IdxFile, BackupDir),
+       gululog_file:delete(SegFile, BackupDir)];
     {IdxPos, SegPos} ->
-      IsIdxRepaired = gululog_file:maybe_truncate_file(IdxFile, IdxPos, BackupDir),
-      IsSegRepaired = gululog_file:maybe_truncate_file(SegFile, SegPos, BackupDir),
+      IsIdxRepaired = gululog_file:maybe_truncate(IdxFile, IdxPos, BackupDir),
+      IsSegRepaired = gululog_file:maybe_truncate(SegFile, SegPos, BackupDir),
       [{?REPAIR_RESECTED, IdxFile} || IsIdxRepaired] ++
       [{?REPAIR_RESECTED, SegFile} || IsSegRepaired]
   end.
