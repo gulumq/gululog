@@ -1,10 +1,10 @@
-%% @doc File
+%% @doc Gululog index and segment file operation APIs.
 
 -module(gululog_file).
 
--export([ remove_file/2
-        , copy_file/2
-        , maybe_truncate_file/3
+-export([ delete/2
+        , copy/2
+        , maybe_truncate/3
         ]).
 
 %%%*_ MACROS and SPECS =========================================================
@@ -13,22 +13,22 @@
 
 %%%*_ API FUNCTIONS ============================================================
 
-%% @doc Copy the file to another name and remove the source file.
+%% @doc Copy the file to another name and delete the source file.
 %% @end
--spec remove_file(filename(), ?undef | dirname()) -> ok.
-remove_file(FileName, ?undef) ->
+-spec delete(filename(), ?undef | dirname()) -> file_op().
+delete(FileName, ?undef) ->
   ok = file:delete(FileName),
-  {?REPAIR_DELETED, FileName};
-remove_file(FileName, TargetDir) ->
+  {?OP_DELETED, FileName};
+delete(FileName, TargetDir) ->
   TargetFile = backup_filename(FileName, TargetDir),
   ok = filelib:ensure_dir(TargetFile),
   ok = file:rename(FileName, TargetFile),
-  {?REPAIR_BACKEDUP, FileName}.
+  {?OP_BACKEDUP, FileName}.
 
 %% @doc Maybe backup the original file, then truncate at the given position.
 %% @end
--spec maybe_truncate_file(filename(), position(), ?undef | dirname()) -> boolean().
-maybe_truncate_file(FileName, Position, BackupDir) ->
+-spec maybe_truncate(filename(), position(), ?undef | dirname()) -> boolean().
+maybe_truncate(FileName, Position, BackupDir) ->
   %% open with 'read' mode, otherwise truncate does not work
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   try
@@ -36,7 +36,7 @@ maybe_truncate_file(FileName, Position, BackupDir) ->
     true = (Position =< Size), %% assert
     case Position < Size of
       true ->
-        [ok = copy_file(FileName, BackupDir) || BackupDir =/= ?undef],
+        [ok = copy(FileName, BackupDir) || BackupDir =/= ?undef],
         {ok, Position} = file:position(Fd, Position),
         ok = file:truncate(Fd),
         true;
@@ -49,8 +49,8 @@ maybe_truncate_file(FileName, Position, BackupDir) ->
 
 %% @doc Copy .idx or .seg file to the given directory.
 %% @end
--spec copy_file(filename(), dirname()) -> ok.
-copy_file(Source, TargetDir) ->
+-spec copy(filename(), dirname()) -> ok.
+copy(Source, TargetDir) ->
   TargetFile = backup_filename(Source, TargetDir),
   ok = filelib:ensure_dir(TargetFile),
   {ok, _} = file:copy(Source, TargetFile),
@@ -87,14 +87,14 @@ move_test_() ->
   ok = file:write_file(SegFile, <<"seg">>, [binary]),
   [ { "move idx file"
     , fun() ->
-        _ = remove_file(IdxFile, BackupDir),
+        _ = delete(IdxFile, BackupDir),
         ?assertEqual({ok, <<"idx">>}, file:read_file(BackupIdxFile)),
         ?assertEqual(false, filelib:is_file(IdxFile))
       end
     }
   , { "move seg file"
     , fun() ->
-        _ = remove_file(SegFile, ?undef),
+        _ = delete(SegFile, ?undef),
         ?assertEqual(false, filelib:is_file(BackupSegFile)),
         ?assertEqual(false, filelib:is_file(SegFile))
       end
@@ -115,14 +115,14 @@ truncate_test_() ->
   ok = file:write_file(SegFile, <<"0123456789">>, [binary]),
   [ { "truncate idx file"
     , fun() ->
-        true = maybe_truncate_file(IdxFile, 1, BackupDir),
+        true = maybe_truncate(IdxFile, 1, BackupDir),
         ?assertEqual({ok, <<"0">>}, file:read_file(IdxFile)),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(BackupIdxFile))
       end
     }
   , { "truncate seg file"
     , fun() ->
-        false = maybe_truncate_file(SegFile, 10, BackupDir),
+        false = maybe_truncate(SegFile, 10, BackupDir),
         ?assertEqual({ok, <<"0123456789">>}, file:read_file(SegFile))
       end
     }
