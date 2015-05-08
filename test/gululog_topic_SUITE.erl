@@ -104,9 +104,9 @@ t_truncate_inclusive(Config) when is_list(Config) ->
   T13 = gululog_topic:force_switch(T12),
   T14 = gululog_topic:append(T13, <<"key">>, <<"value">>),
   %% 1st truncate
-  {T15, Result1} = gululog_topic:truncate(T14, 10, undefined),
+  {T15, Result1} = gululog_topic:truncate(T14, 10, ?undef),
   ?assertEqual([], Result1),
-  {T16, Result4} = gululog_topic:truncate(T15, 7, undefined),
+  {T16, Result4} = gululog_topic:truncate(T15, 7, ?undef),
   ?assertEqual([{?OP_DELETED,   gululog_name:mk_idx_name(Dir, 9)},
                 {?OP_DELETED,   gululog_name:mk_seg_name(Dir, 9)},
                 {?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 6)},

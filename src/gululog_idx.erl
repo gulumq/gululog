@@ -470,7 +470,7 @@ gululog_idx_test_() ->
          %% 1st truncate
          LogId1 = InitLogId + 10,
          {SegId1, _} = locate(Dir, Idx12, LogId1),
-         {Idx13, Truncated1} = truncate(Dir, Idx12, SegId1, LogId1, undefined),
+         {Idx13, Truncated1} = truncate(Dir, Idx12, SegId1, LogId1, ?undef),
          ?assertEqual(7, Idx13#idx.segid),
          ?assertEqual([{?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 7)}], Truncated1),
          %% 2nd truncate
@@ -484,7 +484,7 @@ gululog_idx_test_() ->
          %%
          LogIdone = InitLogId + 7,
          {SegIdone, _} = locate(Dir, Idx14, LogIdone),
-         {Idxone,   _} = truncate(Dir, Idx14, SegIdone, LogIdone, undefined),
+         {Idxone,   _} = truncate(Dir, Idx14, SegIdone, LogIdone, ?undef),
          ?assertEqual(5, Idxone#idx.segid),
          %% 3rd truncate, segid == 7 already deleted
          LogId3 = InitLogId + 6,
@@ -497,7 +497,7 @@ gululog_idx_test_() ->
          %% 4 truncate
          LogId4 = InitLogId + 3,
          {Segid4, _} = locate(Dir, Idx15, LogId4),
-         {Idx16, Truncated4} = truncate(Dir, Idx15, Segid4, LogId4, undefined),
+         {Idx16, Truncated4} = truncate(Dir, Idx15, Segid4, LogId4, ?undef),
          ?assertEqual([{?OP_DELETED, gululog_name:mk_idx_name(Dir, 5)},
                        {?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 0)}],
                       lists:sort(Truncated4)),
@@ -510,7 +510,7 @@ gululog_idx_test_() ->
          %% 5 truncate
          LogId5 = InitLogId,
          {SegId5, _} = locate(Dir, Idx16, LogId5),
-         {Idx17, _}  = truncate(Dir, Idx16, SegId5, LogId5, undefined),
+         {Idx17, _}  = truncate(Dir, Idx16, SegId5, LogId5, ?undef),
          ?assertEqual(0, Idx17#idx.segid),
          %% re-init
          flush_close(Idx17),
