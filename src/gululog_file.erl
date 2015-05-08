@@ -14,7 +14,6 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Copy the file to another name and delete the source file.
-%% @end
 -spec delete(filename(), ?undef | dirname()) -> file_op().
 delete(FileName, ?undef) ->
   ok = file:delete(FileName),
@@ -26,7 +25,6 @@ delete(FileName, TargetDir) ->
   {?OP_BACKEDUP, FileName}.
 
 %% @doc Maybe backup the original file, then truncate at the given position.
-%% @end
 -spec maybe_truncate(filename(), position(), ?undef | dirname()) -> boolean().
 maybe_truncate(FileName, Position, BackupDir) ->
   %% open with 'read' mode, otherwise truncate does not work
@@ -48,7 +46,6 @@ maybe_truncate(FileName, Position, BackupDir) ->
   end.
 
 %% @doc Copy .idx or .seg file to the given directory.
-%% @end
 -spec copy(filename(), dirname()) -> ok.
 copy(Source, TargetDir) ->
   TargetFile = backup_filename(Source, TargetDir),

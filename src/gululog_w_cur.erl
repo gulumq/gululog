@@ -39,7 +39,6 @@
 next_log_position(#wcur{position = Position}) -> Position.
 
 %% @doc Open the last segment file the given directory for writer to append.
-%% @end
 -spec open(dirname()) -> cursor() | no_return().
 open(Dir) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
