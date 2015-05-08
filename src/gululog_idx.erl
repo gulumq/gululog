@@ -254,7 +254,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   %% close writer fd
   ok = file_sync_close(Fd),
   %% delete idx file for > segid
-  FileOpList1 = truncate_delete_do(DeleteSegIdList0, Dir, BackupDir),
+  FileOpList1 = truncate_delete_do(DeleteSegIdList, Dir, BackupDir),
   %% truncate idx file for = segid
   FileOpList2 = truncate_truncate_do(Dir, SegIdToTruncate, LogId, BackupDir),
   NewIdx =
@@ -469,12 +469,12 @@ gululog_idx_test_() ->
          {SegId1, _} = locate("./", Idx12, LogId1),
          {Idx13, Truncated1} = truncate("./", Idx12, SegId1, LogId1, undefined),
          ?assertEqual(7, Idx13#idx.segid),
-         ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated1),
+         ?assertEqual([{?OP_TRUNCATED, gululog_name:mk_idx_name("./", 7)}], Truncated1),
          %% 2nd truncate
          LogId2 = InitLogId + 9,
          {SegId2, _} = locate("./", Idx13, LogId2),
          {Idx14, Truncated2} = truncate("./", Idx13, SegId2, LogId2, "./backup/"),
-         ?assertEqual([gululog_name:mk_idx_name("./", 7)], Truncated2),
+         ?assertEqual([{?OP_TRUNCATED, gululog_name:mk_idx_name("./", 7)}], Truncated2),
          ?assertEqual([gululog_name:mk_idx_name("./backup/", 7)],
                       gululog_name:wildcard_idx_name_reversed("./backup")),
          ?assertEqual(7, Idx14#idx.segid),
@@ -483,11 +483,11 @@ gululog_idx_test_() ->
          {SegIdone, _} = locate("./", Idx14, LogIdone),
          {Idxone,   _} = truncate("./", Idx14, SegIdone, LogIdone, undefined),
          ?assertEqual(5, Idxone#idx.segid),
-         %% 3rd truncate
+         %% 3rd truncate, segid == 7 already deleted
          LogId3 = InitLogId + 6,
          {SegId3, _} = locate("./", Idxone, LogId3),
          {Idx15, Truncated3} = truncate("./", Idxone, SegId3, LogId3, "./backup_delete"),
-         ?assertEqual([gululog_name:mk_idx_name("./", 5)], lists:sort(Truncated3)),
+         ?assertEqual([{?OP_TRUNCATED, gululog_name:mk_idx_name("./", 5)}], lists:sort(Truncated3)),
          ?assertEqual([gululog_name:mk_idx_name("./backup_delete", 5)],
                       gululog_name:wildcard_idx_name_reversed("./backup_delete")),
          ?assertEqual(5, Idx15#idx.segid),
@@ -495,8 +495,8 @@ gululog_idx_test_() ->
          LogId4 = InitLogId + 3,
          {Segid4, _} = locate("./", Idx15, LogId4),
          {Idx16, Truncated4} = truncate("./", Idx15, Segid4, LogId4, undefined),
-         ?assertEqual([gululog_name:mk_idx_name("./", 0),
-                       gululog_name:mk_idx_name("./", 5)],
+         ?assertEqual([{?OP_DELETED, gululog_name:mk_idx_name("./", 5)},
+                       {?OP_TRUNCATED, gululog_name:mk_idx_name("./", 0)}],
                       lists:sort(Truncated4)),
          ?assertEqual(0, Idx16#idx.segid),
          Expect2 = [{0, {0, 10}},
