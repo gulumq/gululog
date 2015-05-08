@@ -11,6 +11,7 @@
 
 %%%*_ API FUNCTIONS ============================================================
 
+%% @doc Recursively clean up the given directory, sub-directories are deleted.
 cleanup(Dir) ->
   Files = gululog_name:wildcard_idx_name_reversed(Dir) ++
           gululog_name:wildcard_seg_name_reversed(Dir),
