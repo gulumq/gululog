@@ -15,7 +15,7 @@
 
 %% cases
 -export([ t_basic_flow/1
-        , t_truncate_inclusive/1
+        , t_truncate/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -82,33 +82,33 @@ t_basic_flow(Config) when is_list(Config) ->
 
   ok.
 
-t_truncate_inclusive({init, Config}) ->
+t_truncate({init, Config}) ->
   Config;
-t_truncate_inclusive({'end', _Config}) ->
+t_truncate({'end', _Config}) ->
   ok;
-t_truncate_inclusive(Config) when is_list(Config) ->
+t_truncate(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = filename:join(Dir, "backup"),
   CaseList =
-        [ {append,       <<"key">>, <<"value">>}
-        , {append,       <<"key">>, <<"value">>}
-        , {append,       <<"key">>, <<"value">>}
-        , {append,       <<"key">>, <<"value">>}
-        , {append,       <<"key">>, <<"value">>}
-        , {force_switch                        }
-        , {append,       <<"key">>, <<"value">>}
-        , {force_switch                        }
-        , {append,       <<"key">>, <<"value">>}
-        , {append,       <<"key">>, <<"value">>}
-        , {append,       <<"key">>, <<"value">>}
-        , {force_switch                        }
-        , {append,       <<"key">>, <<"value">>}
-        ],
+    [ {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , force_switch
+    , {append,       <<"key">>, <<"value">>}
+    , force_switch
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , force_switch
+    , {append,       <<"key">>, <<"value">>}
+    ],
   %% generate test case data
   T14 = lists:foldl(
           fun({append, Header, Body}, IdxIn) ->
                 gululog_topic:append(IdxIn, Header, Body);
-             ({force_switch}, IdxIn) ->
+             (force_switch, IdxIn) ->
                 gululog_topic:force_switch(IdxIn)
           end, gululog_topic:init(Dir, []), CaseList),
   %% 1st truncate
