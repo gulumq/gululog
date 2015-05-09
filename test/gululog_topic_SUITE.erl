@@ -89,20 +89,28 @@ t_truncate_inclusive({'end', _Config}) ->
 t_truncate_inclusive(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = filename:join(Dir, "backup"),
-  T1 = gululog_topic:init(Dir, []),
-  T2 = gululog_topic:append(T1, <<"key">>, <<"value">>),
-  T3 = gululog_topic:append(T2, <<"key">>, <<"value">>),
-  T4 = gululog_topic:append(T3, <<"key">>, <<"value">>),
-  T5 = gululog_topic:append(T4, <<"key">>, <<"value">>),
-  T6 = gululog_topic:append(T5, <<"key">>, <<"value">>),
-  T7 = gululog_topic:force_switch(T6),
-  T8 = gululog_topic:append(T7, <<"key">>, <<"value">>),
-  T9 = gululog_topic:force_switch(T8),
-  T10 = gululog_topic:append(T9, <<"key">>, <<"value">>),
-  T11 = gululog_topic:append(T10, <<"key">>, <<"value">>),
-  T12 = gululog_topic:append(T11, <<"key">>, <<"value">>),
-  T13 = gululog_topic:force_switch(T12),
-  T14 = gululog_topic:append(T13, <<"key">>, <<"value">>),
+  CaseList =
+        [ {append,       <<"key">>, <<"value">>}
+        , {append,       <<"key">>, <<"value">>}
+        , {append,       <<"key">>, <<"value">>}
+        , {append,       <<"key">>, <<"value">>}
+        , {append,       <<"key">>, <<"value">>}
+        , {force_switch                        }
+        , {append,       <<"key">>, <<"value">>}
+        , {force_switch                        }
+        , {append,       <<"key">>, <<"value">>}
+        , {append,       <<"key">>, <<"value">>}
+        , {append,       <<"key">>, <<"value">>}
+        , {force_switch                        }
+        , {append,       <<"key">>, <<"value">>}
+        ],
+  %% generate test case data
+  T14 = lists:foldl(
+          fun({append, Header, Body}, IdxIn) ->
+                gululog_topic:append(IdxIn, Header, Body);
+             ({force_switch}, IdxIn) ->
+                gululog_topic:force_switch(IdxIn)
+          end, gululog_topic:init(Dir, []), CaseList),
   %% 1st truncate
   {T15, Result1} = gululog_topic:truncate(T14, 10, ?undef),
   ?assertEqual([], Result1),

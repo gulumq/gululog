@@ -181,7 +181,7 @@ locate_in_cache(Tid, LogId) ->
   end.
 
 %% @doc Get latest logid from index.
-%% return 'false' iif it is an empty index.
+%% return 'false' if it is an empty index.
 %% @end
 -spec get_latest_logid(index() | cache()) -> logid() | false.
 get_latest_logid(#idx{tid = Tid}) ->
@@ -260,7 +260,8 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   %% truncate idx file for = segid
   FileOpList2 = truncate_truncate_do(Dir, SegIdToTruncate, LogId, BackupDir),
   NewIdx =
-    case LogId =:= 0 of
+    %% verify the given logid is the first one
+    case LogId =:= ets:first(Tid) of
       true ->
         [] = wildcard_reversed(Dir), %% assert
         ok = close_cache(Tid),
