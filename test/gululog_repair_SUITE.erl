@@ -17,9 +17,9 @@
 -export([ t_nothing_to_repair/1
         , t_backup_seg/1
         , t_backup_idx/1
-        , t_resect_corrupted_1st_log_body/1
-        , t_resect_index_ahead/1
-        , t_resect_seg_ahead/1
+        , t_truncate_corrupted_1st_log_body/1
+        , t_truncate_index_ahead/1
+        , t_truncate_seg_ahead/1
         , t_empty_seg_file/1
         , t_empty_idx_file/1
         , t_empty_idx_and_seg_file/1
@@ -75,7 +75,7 @@ t_backup_seg(Config) when is_list(Config) ->
   BackupDir = ?config(backup_dir),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
   SegFile = gululog_name:mk_seg_name(Dir, 0),
-  ?assertEqual([{?REPAIR_BACKEDUP, SegFile}], RepairedFiles),
+  ?assertEqual([{?OP_BACKEDUP, SegFile}], RepairedFiles),
   BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
   ?assertEqual(true, filelib:is_file(BackupFile)).
 
@@ -101,7 +101,7 @@ t_backup_idx(Config) when is_list(Config) ->
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
-  ?assertEqual([{?REPAIR_BACKEDUP, Idx1File}], RepairedFiles),
+  ?assertEqual([{?OP_BACKEDUP, Idx1File}], RepairedFiles),
   BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
   %% assert segment 0 is untouched
   ?assertEqual(true, filelib:is_file(Idx0File)),
@@ -109,10 +109,10 @@ t_backup_idx(Config) when is_list(Config) ->
   %% assert segment 1 is backedup
   ?assertEqual(true, filelib:is_file(BackupFile)).
 
-%% @doc The viery first log entry, resecting it would cause removal.
+%% @doc The viery first log entry, truncating it would cause removal.
 %% of both index and segment file
 %% @end
-t_resect_corrupted_1st_log_body({init, Config}) ->
+t_truncate_corrupted_1st_log_body({init, Config}) ->
   Dir = ?config(dir),
   SegId = 0,
   %% write a log
@@ -126,8 +126,8 @@ t_resect_corrupted_1st_log_body({init, Config}) ->
   {ok, _} = file:position(Fd, Pos0 - 2),
   ok = file:write(Fd, <<"nok">>),
   Config;
-t_resect_corrupted_1st_log_body({'end', _Config}) -> ok;
-t_resect_corrupted_1st_log_body(Config) when is_list(Config) ->
+t_truncate_corrupted_1st_log_body({'end', _Config}) -> ok;
+t_truncate_corrupted_1st_log_body(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
@@ -135,8 +135,8 @@ t_resect_corrupted_1st_log_body(Config) when is_list(Config) ->
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Idx0BackupFile = gululog_name:mk_idx_name(BackupDir, 0),
   Seg0BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
-  ?assertEqual([{?REPAIR_BACKEDUP, Idx0File},
-                {?REPAIR_BACKEDUP, Seg0File}], RepairedFiles),
+  ?assertEqual([{?OP_BACKEDUP, Idx0File},
+                {?OP_BACKEDUP, Seg0File}], RepairedFiles),
   %% assert segment 0 files are removed
   ?assertEqual(false, filelib:is_file(Idx0File)),
   ?assertEqual(false, filelib:is_file(Seg0File)),
@@ -148,7 +148,7 @@ t_resect_corrupted_1st_log_body(Config) when is_list(Config) ->
 %% @doc Index entries are ahead of segment entry
 %% expecting the index entries ahead are cut off when repair
 %% @end
-t_resect_index_ahead({init, Config}) ->
+t_truncate_index_ahead({init, Config}) ->
   Dir = ?config(dir),
   %% write a log
   Topic0 = gululog_topic:init(Dir, [{segMB, 1}]),
@@ -160,14 +160,14 @@ t_resect_index_ahead({init, Config}) ->
   Idx2 = gululog_idx:append(Idx1, 2, 2000),
   ok = gululog_idx:flush_close(Idx2),
   Config;
-t_resect_index_ahead({'end', _Config}) -> ok;
-t_resect_index_ahead(Config) when is_list(Config) ->
+t_truncate_index_ahead({'end', _Config}) -> ok;
+t_truncate_index_ahead(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
-  ?assertEqual([{?REPAIR_RESECTED, Idx0File}], RepairedFiles),
+  ?assertEqual([{?OP_TRUNCATED, Idx0File}], RepairedFiles),
   Idx0BackupFile = gululog_name:mk_idx_name(BackupDir, 0),
   Seg0BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
   %% assert segment 0 files are still there
@@ -184,7 +184,7 @@ t_resect_index_ahead(Config) when is_list(Config) ->
 %% @doc Log entries in segment file is ahead of index.
 %% expecting the log entries ahead are cut off when repair
 %% @end
-t_resect_seg_ahead({init, Config}) ->
+t_truncate_seg_ahead({init, Config}) ->
   Dir = ?config(dir),
   %% write a log
   Topic0 = gululog_topic:init(Dir, [{segMB, 1}]),
@@ -196,14 +196,14 @@ t_resect_seg_ahead({init, Config}) ->
   Cur2 = gululog_w_cur:append(Cur1, 1, <<"header2">>, <<"body2">>),
   gululog_w_cur:flush_close(Cur2),
   Config;
-t_resect_seg_ahead({'end', _Config}) -> ok;
-t_resect_seg_ahead(Config) when is_list(Config) ->
+t_truncate_seg_ahead({'end', _Config}) -> ok;
+t_truncate_seg_ahead(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
-  ?assertEqual([{?REPAIR_RESECTED, Seg0File}], RepairedFiles),
+  ?assertEqual([{?OP_TRUNCATED, Seg0File}], RepairedFiles),
   Idx0BackupFile = gululog_name:mk_idx_name(BackupDir, 0),
   Seg0BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
   %% assert segment 0 files are still there
@@ -245,8 +245,8 @@ t_empty_seg_file(Config) when is_list(Config) ->
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Seg1File = gululog_name:mk_seg_name(Dir, 1),
-  ?assertEqual([{?REPAIR_BACKEDUP, Idx1File},
-                {?REPAIR_BACKEDUP, Seg1File}], RepairedFiles),
+  ?assertEqual([{?OP_BACKEDUP, Idx1File},
+                {?OP_BACKEDUP, Seg1File}], RepairedFiles),
   Idx1BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
   Seg1BackupFile = gululog_name:mk_seg_name(BackupDir, 1),
   %% assert segment 0 files are still there
@@ -282,8 +282,8 @@ t_empty_idx_file(Config) when is_list(Config) ->
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Seg1File = gululog_name:mk_seg_name(Dir, 1),
-  ?assertEqual([{?REPAIR_BACKEDUP, Idx1File},
-                {?REPAIR_BACKEDUP, Seg1File}], RepairedFiles),
+  ?assertEqual([{?OP_BACKEDUP, Idx1File},
+                {?OP_BACKEDUP, Seg1File}], RepairedFiles),
   Idx1BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
   Seg1BackupFile = gululog_name:mk_seg_name(BackupDir, 1),
   %% assert segment 0 files are still there
@@ -315,8 +315,8 @@ t_empty_idx_and_seg_file(Config) when is_list(Config) ->
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Seg1File = gululog_name:mk_seg_name(Dir, 1),
-  ?assertEqual([{?REPAIR_DELETED, Idx1File},
-                {?REPAIR_DELETED, Seg1File}], RepairedFiles),
+  ?assertEqual([{?OP_DELETED, Idx1File},
+                {?OP_DELETED, Seg1File}], RepairedFiles),
   %% assert segment 0 files are still there
   ?assertEqual(true, filelib:is_file(Idx0File)),
   ?assertEqual(true, filelib:is_file(Seg0File)),

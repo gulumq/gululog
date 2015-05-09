@@ -67,19 +67,19 @@ t_basic_flow(Config) when is_list(Config) ->
                   Location = gululog_idx:locate(Dir, Index, LogId),
                   ?assertEqual(ExpectedLocation, Location)
                 end, Expects),
-  ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
+  ?assertMatch(4, gululog_idx:get_latest_logid(Index)),
   %% delete segment 0
-  ?assertEqual(0, gululog_idx:delete_oldest_seg(Dir, Index)),
+  ?assertMatch({0, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
   %% delete segment 3
-  ?assertEqual(3, gululog_idx:delete_oldest_seg(Dir, Index)),
+  ?assertMatch({3, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
   %% verify that segment 4 is still there
-  ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
+  ?assertMatch(4, gululog_idx:get_latest_logid(Index)),
   %% delete segment 4
-  ?assertEqual(4, gululog_idx:delete_oldest_seg(Dir, Index)),
+  ?assertMatch({4, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
   %% nothing left (segment 5 is empty)
-  ?assertEqual(false, gululog_idx:delete_oldest_seg(Dir, Index)),
+  ?assertMatch({false, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
   %% verify nothing left
-  ?assertEqual(false, gululog_idx:get_latest_logid(Index)),
+  ?assertMatch(false, gululog_idx:get_latest_logid(Index)),
   ok.
 
 %% @doc Init from existing files.

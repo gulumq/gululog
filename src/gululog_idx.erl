@@ -13,6 +13,7 @@
         , switch_append/4     %% switch then append
         , delete_oldest_seg/2 %% Delete oldest segment from index
         , delete_from_cache/2 %% Delete given log entry from index cache
+        , truncate/5          %% Truncate cache and file from the given logid (inclusive)
         ]).
 
 %% APIs for readers (public access)
@@ -23,7 +24,7 @@
         , locate_in_cache/2
         ]).
 
-%% APIs for repair
+%% APIs for repair / truncation
 -export([get_position_in_index_file/2]).
 
 -export_type([ index/0
@@ -67,7 +68,7 @@
 -spec init(dirname()) -> index() | {error, no_return()}.
 init(Dir) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
-  {IsNew, IndexFiles} = case wildcard_reverse(Dir) of
+  {IsNew, IndexFiles} = case wildcard_reversed(Dir) of
                           []    -> {true, [mk_name(Dir, 0)]};
                           Files -> {false, Files}
                         end,
@@ -117,17 +118,18 @@ append(#idx{ version = ?LOGVSN
 %% return the segid that is deleted, return 'false' in case:
 %% 1. nothing to delete
 %% 2. the oldest is also the latest, it is considered as purging the entire log
+%%    should be done using truncate API instead.
 %% @end
--spec delete_oldest_seg(dirname(), index()) -> segid() | false.
+-spec delete_oldest_seg(dirname(), index()) -> {segid() | false, index()}.
 delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
   case get_oldest_segid(Index) of
     SegIdToDelete when is_integer(SegIdToDelete) andalso SegIdToDelete < CurrentSegId ->
       Ms = ets:fun2ms(fun(?ETS_ENTRY(SegId, _, _)) -> SegId =:= SegIdToDelete end),
       _ = ets:select_delete(Tid, Ms),
       ok = file:delete(mk_name(Dir, SegIdToDelete)),
-      SegIdToDelete;
+      {SegIdToDelete, Index};
     _ ->
-      false
+      {false, Index}
   end.
 
 %% @doc Switch to a new log segment
@@ -179,7 +181,7 @@ locate_in_cache(Tid, LogId) ->
   end.
 
 %% @doc Get latest logid from index.
-%% return 'false' iif it is an empty index.
+%% return 'false' if it is an empty index.
 %% @end
 -spec get_latest_logid(index() | cache()) -> logid() | false.
 get_latest_logid(#idx{tid = Tid}) ->
@@ -195,8 +197,9 @@ close_cache(Tid) ->
   true = ets:delete(Tid),
   ok.
 
-%% @doc To find the byte offset for the logid next to the given one in the index file.
-%% Clled when trying to repair possibly corrupted segment
+%% @doc To find the byte offset for the given logid in the index file.
+%% Called when trying to repair possibly corrupted segment
+%% or when truncating logs
 %% @end
 -spec get_position_in_index_file(filename(), logid()) -> position().
 get_position_in_index_file(FileName, LogId) ->
@@ -234,7 +237,57 @@ delete_from_cache(Tid, LogId) ->
   end,
   Tid.
 
+%% @doc Truncate from the given logid from cache and index file.
+%% Return new index(), the truncated segid, and a list of deleted segids
+%% @end
+-spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
+        {index(), ?undef | segid(), [segid()]}.
+truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
+  false = is_out_of_range(Tid, LogId), %% assert
+  %% Find all the Segids that are greater than the given segid -- to be deleted
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(I, I, _)) when I > SegId -> I end),
+  DeleteSegIdList0 = ets:select(Tid, Ms),
+  %% In case truncating from the very beginning, delete instead
+  {SegIdToTruncate, DeleteSegIdList} =
+    case SegId =:= LogId of
+      true  -> {?undef, [SegId | DeleteSegIdList0]};
+      false -> {SegId, DeleteSegIdList0}
+    end,
+  %% close writer fd
+  ok = file_sync_close(Fd),
+  %% delete idx file for > segid
+  FileOpList1 = truncate_delete_do(DeleteSegIdList, Dir, BackupDir),
+  %% truncate idx file for = segid
+  FileOpList2 = truncate_truncate_do(Dir, SegIdToTruncate, LogId, BackupDir),
+  NewIdx =
+    %% verify the given logid is the first one
+    case LogId =:= ets:first(Tid) of
+      true ->
+        [] = wildcard_reversed(Dir), %% assert
+        ok = close_cache(Tid),
+        init(Dir);
+      false ->
+        NewTid = truncate_cache(Tid, LogId),
+        {NewSegId, _} = locate_in_cache(Tid, LogId - 1),
+        FileName = mk_name(Dir, NewSegId),
+        {Version, NewFd} = open_writer_fd(false, FileName),
+        Idx#idx{ version = Version
+               , fd      = NewFd
+               , segid   = NewSegId
+               , tid     = NewTid
+               }
+    end,
+  {NewIdx, FileOpList1 ++ FileOpList2}.
+
 %%%*_ PRIVATE FUNCTIONS ========================================================
+
+%% @private Truncate cache, from the given logid (inclusive).
+-spec truncate_cache(cache(), logid()) -> cache().
+truncate_cache(Tid, LogId) ->
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _)) -> LogIdX >= LogId end),
+  _ = ets:select_delete(Tid, Ms),
+  Tid.
+
 
 %% @private Scan the index file to locate the log position in segment file
 %% This function is called only when ets cache is not hit
@@ -308,11 +361,11 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
 %% @end
--spec wildcard_reverse(dirname()) -> [filename()].
-wildcard_reverse(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
+-spec wildcard_reversed(dirname()) -> [filename()].
+wildcard_reversed(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
--spec open_writer_fd(boolean(), filename()) -> file:fd() | no_return().
+-spec open_writer_fd(IsNew :: boolean(), filename()) -> file:fd() | no_return().
 open_writer_fd(true, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   ok = file:write(Fd, <<?LOGVSN:8>>),
@@ -322,7 +375,7 @@ open_writer_fd(false, FileName) ->
   {ok, <<Version:8>>} = file:read(Fd, 1),
   {ok, Position} = file:position(Fd, eof),
   %% Hopefully, this assertion never fails,
-  %% In case it happens, add a function to resect the corrupted tail.
+  %% In case it happens, add a function to truncate the corrupted tail.
   0 = (Position - 1) rem file_entry_bytes(Version), %% assert
   {Version, Fd}.
 
@@ -352,12 +405,160 @@ get_oldest_segid(#idx{tid = Tid}) ->
   end.
 
 %% @private Sync and and close file.
--spec file_sync_close(file:fds()) -> ok.
+-spec file_sync_close(file:fd()) -> ok.
 file_sync_close(Fd) ->
   ok = file:sync(Fd),
   ok = file:close(Fd).
 
+%% @private Delete index files.
+%% It is very important to delete files in reversed order in order to keep
+%% data integrity (in case this function crashes in the middle for example)
+%% @end
+-spec truncate_delete_do([segid()], dirname(), ?undef | dirname()) -> [file_op()].
+truncate_delete_do(DeleteSegIdList, Dir, BackupDir) ->
+  lists:map(fun(SegId) ->
+              gululog_file:delete(mk_name(Dir, SegId), BackupDir)
+            end, lists:reverse(lists:sort(DeleteSegIdList))).
+
+%% @private Truncate index file.
+-spec truncate_truncate_do(dirname(), ?undef | segid(), logid(),
+                           ?undef | dirname()) -> [file_op()].
+truncate_truncate_do(_Dir, ?undef, _LogId, _BackupDir) -> [];
+truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
+  IdxFile = mk_name(Dir, SegId),
+  IdxPosition = get_position_in_index_file(IdxFile, LogId),
+  true = gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir), %% assert
+  [{?OP_TRUNCATED, IdxFile}].
+
 %%%*_ TESTS ====================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+test_dir() ->
+  {ok, Dir} = file:get_cwd(),
+  filename:join(Dir, "gululog_idx-ut").
+
+gululog_idx_test_() ->
+  { foreach
+  , fun() ->
+      Dir = test_dir(),
+      DataList =
+        [ {append,        0, 1}
+        , {append,        1, 10}
+        , {append,        2, 20}
+        , {append,        3, 30}
+        , {append,        4, 40}
+        , {switch_append, 5, 1}
+        , {append,        6, 60}
+        , {switch_append, 7, 1}
+        , {append,        8, 80}
+        , {append,        9, 90}
+        , {append,        10, 100}
+        ],
+      Idx = lists:foldl(
+              fun({append, LogId, Position}, IdxIn) ->
+                    append(IdxIn, LogId, Position);
+                 ({switch_append, LogId, Position}, IdxIn) ->
+                    switch_append(Dir, IdxIn, LogId, Position)
+              end, init(Dir), DataList),
+      ok = flush_close(Idx)
+    end
+  , fun(_) ->
+      gululog_test_lib:cleanup(test_dir())
+    end
+  , [ { "basic truncation test"
+      , fun() ->
+          Dir             = test_dir(),
+          BackupDir       = filename:join(Dir, "backup"),
+          BackupDirDelete = filename:join(Dir, "backup_delete"),
+          Idx0 = init(Dir),
+          Expect1 = [{0, {0, 1}},
+                     {1, {0, 10}},
+                     {2, {0, 20}},
+                     {3, {0, 30}},
+                     {4, {0, 40}},
+                     {5, {5, 1}},
+                     {6, {5, 60}},
+                     {7, {7, 1}},
+                     {8, {7, 80}},
+                     {9, {7, 90}},
+                     {10, {7, 100}}],
+          ?assertEqual(Expect1, ets:tab2list(Idx0#idx.tid)),
+          ?assertException(error, {badmatch, true},
+                           truncate(Dir, Idx0, 7, 11, ?undef)),
+          Idx12 = Idx0, %% bing lazy to update the suffix number
+          %% truncate the last log
+          LogId1 = 10,
+          {SegId1, _} = locate(Dir, Idx12, LogId1),
+          {Idx13, Truncated1} = truncate(Dir, Idx12, SegId1, LogId1, ?undef),
+          ?assertEqual(7, Idx13#idx.segid),
+          ?assertEqual([{?OP_TRUNCATED, mk_name(Dir, 7)}], Truncated1),
+          %% truncate 9
+          LogId2 = 9,
+          {SegId2, _} = locate(Dir, Idx13, LogId2),
+          {Idx14, Truncated2} = truncate(Dir, Idx13, SegId2, LogId2, BackupDir),
+          ?assertEqual([{?OP_TRUNCATED, mk_name(Dir, 7)}], Truncated2),
+          ?assertEqual([mk_name(BackupDir, 7)],
+                        wildcard_reversed(BackupDir)),
+          ?assertEqual(7, Idx14#idx.segid),
+          %% truncate 7
+          LogIdone = 7,
+          {SegIdone, _} = locate(Dir, Idx14, LogIdone),
+          {Idxone,   _} = truncate(Dir, Idx14, SegIdone, LogIdone, ?undef),
+          ?assertEqual(5, Idxone#idx.segid),
+          %% truncate 6
+          LogId3 = 6,
+          {SegId3, _} = locate(Dir, Idxone, LogId3),
+          {Idx15, Truncated3} = truncate(Dir, Idxone, SegId3, LogId3, BackupDirDelete),
+          ?assertEqual([{?OP_TRUNCATED, mk_name(Dir, 5)}], lists:sort(Truncated3)),
+          ?assertEqual([mk_name(BackupDirDelete, 5)],
+                        wildcard_reversed(BackupDirDelete)),
+          ?assertEqual(5, Idx15#idx.segid),
+          %% truncate 3
+          LogId4 = 3,
+          {Segid4, _} = locate(Dir, Idx15, LogId4),
+          {Idx16, Truncated4} = truncate(Dir, Idx15, Segid4, LogId4, ?undef),
+          ?assertEqual([{?OP_DELETED, mk_name(Dir, 5)},
+                        {?OP_TRUNCATED, mk_name(Dir, 0)}],
+                       lists:sort(Truncated4)),
+          ?assertEqual(0, Idx16#idx.segid),
+          Expect2 = [{0, {0, 1}},
+                     {1, {0, 10}},
+                     {2, {0, 20}}],
+          EtsTable2 = Idx16#idx.tid,
+          ?assertEqual(Expect2, ets:tab2list(EtsTable2)),
+          %% truncate to the very beginning
+          LogId5 = 0,
+          {SegId5, _} = locate(Dir, Idx16, LogId5),
+          {Idx17, _}  = truncate(Dir, Idx16, SegId5, LogId5, ?undef),
+          ?assertEqual(0, Idx17#idx.segid),
+          ?assertEqual([], ets:tab2list(Idx17#idx.tid)),
+          %% re-init
+          ok = flush_close(Idx17),
+          NewIdx = init(Dir),
+          NewEtsTable = NewIdx#idx.tid,
+          ?assertEqual([], ets:tab2list(NewEtsTable)),
+          ok = flush_close(NewIdx),
+          ok
+        end
+      }
+    , { "delete old seg + truncate"
+      , fun() ->
+          Dir = test_dir(),
+          Idx0 = init(Dir),
+          ?assertMatch({0, _}, delete_oldest_seg(Dir, Idx0)),
+          Files = lists:sort(wildcard_reversed(Dir)),
+          {Idx1, Truncated} = truncate(Dir, Idx0, 5, 5, ?undef),
+          FilesDeleted = lists:sort(lists:map(fun({?OP_DELETED, Fn}) -> Fn end, Truncated)),
+          ?assertEqual(Files, FilesDeleted),
+          ?assertEqual(0, Idx1#idx.segid)
+        end
+      }
+    ]
+  }.
+
+-endif.
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

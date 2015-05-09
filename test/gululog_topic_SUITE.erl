@@ -15,6 +15,7 @@
 
 %% cases
 -export([ t_basic_flow/1
+        , t_truncate/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -42,7 +43,7 @@ all() -> [F || {F, _A} <- module_info(exports),
                   end].
 
 t_basic_flow({init, Config}) -> Config;
-t_basic_flow({'end', Config}) -> ok;
+t_basic_flow({'end', _Config}) -> ok;
 t_basic_flow(Config) when is_list(Config) ->
   Dir = ?config(dir),
   T0 = gululog_topic:init(Dir, [{segMB, 1}]),
@@ -52,7 +53,7 @@ t_basic_flow(Config) when is_list(Config) ->
   T3 = gululog_topic:append(T2, <<"header2">>, Body($2)),
   ok = gululog_topic:close(T3),
   T4 = gululog_topic:init(Dir, [{segMB, 1}]),
-  T5 = gululog_topic:append(T4, <<"header3">>, Body($3)),
+  _T5 = gululog_topic:append(T4, <<"header3">>, Body($3)),
   Files = [ gululog_name:mk_idx_name(Dir, 0)
           , gululog_name:mk_idx_name(Dir, 2)
           , gululog_name:mk_seg_name(Dir, 0)
@@ -80,6 +81,61 @@ t_basic_flow(Config) when is_list(Config) ->
   ok = gululog_r_cur:close(C5),
 
   ok.
+
+t_truncate({init, Config}) ->
+  Config;
+t_truncate({'end', _Config}) ->
+  ok;
+t_truncate(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  BackupDir = filename:join(Dir, "backup"),
+  CaseList =
+    [ {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , force_switch
+    , {append,       <<"key">>, <<"value">>}
+    , force_switch
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , {append,       <<"key">>, <<"value">>}
+    , force_switch
+    , {append,       <<"key">>, <<"value">>}
+    ],
+  %% generate test case data
+  T14 = lists:foldl(
+          fun({append, Header, Body}, IdxIn) ->
+                gululog_topic:append(IdxIn, Header, Body);
+             (force_switch, IdxIn) ->
+                gululog_topic:force_switch(IdxIn)
+          end, gululog_topic:init(Dir, []), CaseList),
+  %% 1st truncate
+  {T15, Result1} = gululog_topic:truncate(T14, 10, ?undef),
+  ?assertEqual([], Result1),
+  {T16, Result4} = gululog_topic:truncate(T15, 7, ?undef),
+  ?assertEqual([{?OP_DELETED,   gululog_name:mk_idx_name(Dir, 9)},
+                {?OP_DELETED,   gululog_name:mk_seg_name(Dir, 9)},
+                {?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 6)},
+                {?OP_TRUNCATED, gululog_name:mk_seg_name(Dir, 6)}], lists:sort(Result4)),
+  {T17, Result5} = gululog_topic:truncate(T16, 5, BackupDir),
+  ?assertEqual([{?OP_BACKEDUP, gululog_name:mk_idx_name(Dir, 5)},
+                {?OP_BACKEDUP, gululog_name:mk_seg_name(Dir, 5)},
+                {?OP_BACKEDUP, gululog_name:mk_idx_name(Dir, 6)},
+                {?OP_BACKEDUP, gululog_name:mk_seg_name(Dir, 6)}], lists:sort(Result5)),
+  {_T18, Result6} = gululog_topic:truncate(T17, 3, BackupDir),
+  Expect = [{?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 0)},
+            {?OP_TRUNCATED, gululog_name:mk_seg_name(Dir, 0)}],
+  ?assertEqual(Expect, lists:sort(Result6)),
+  Expect1 = [gululog_name:mk_idx_name(BackupDir, 0),
+             gululog_name:mk_seg_name(BackupDir, 0),
+             gululog_name:mk_idx_name(BackupDir, 5),
+             gululog_name:mk_seg_name(BackupDir, 5),
+             gululog_name:mk_idx_name(BackupDir, 6),
+             gululog_name:mk_seg_name(BackupDir, 6)],
+  ?assertEqual(Expect1, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
+                                   ++ gululog_name:wildcard_seg_name_reversed(BackupDir))).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
