@@ -427,8 +427,7 @@ truncate_truncate_do(_Dir, ?undef, _LogId, _BackupDir) -> [];
 truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = mk_name(Dir, SegId),
   IdxPosition = get_position_in_index_file(IdxFile, LogId),
-  true = gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir), %% assert
-  [{?OP_TRUNCATED, IdxFile}].
+  [_ | _] = gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir). %% assert
 
 %%%*_ TESTS ====================================================================
 

@@ -75,7 +75,7 @@ t_backup_seg(Config) when is_list(Config) ->
   BackupDir = ?config(backup_dir),
   {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
   SegFile = gululog_name:mk_seg_name(Dir, 0),
-  ?assertEqual([{?OP_BACKEDUP, SegFile}], RepairedFiles),
+  ?assertEqual([{?OP_DELETED, SegFile}], RepairedFiles),
   BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
   ?assertEqual(true, filelib:is_file(BackupFile)).
 
@@ -101,7 +101,7 @@ t_backup_idx(Config) when is_list(Config) ->
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
-  ?assertEqual([{?OP_BACKEDUP, Idx1File}], RepairedFiles),
+  ?assertEqual([{?OP_DELETED, Idx1File}], RepairedFiles),
   BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
   %% assert segment 0 is untouched
   ?assertEqual(true, filelib:is_file(Idx0File)),
@@ -135,8 +135,8 @@ t_truncate_corrupted_1st_log_body(Config) when is_list(Config) ->
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Idx0BackupFile = gululog_name:mk_idx_name(BackupDir, 0),
   Seg0BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
-  ?assertEqual([{?OP_BACKEDUP, Idx0File},
-                {?OP_BACKEDUP, Seg0File}], RepairedFiles),
+  ?assertEqual([{?OP_DELETED, Idx0File},
+                {?OP_DELETED, Seg0File}], RepairedFiles),
   %% assert segment 0 files are removed
   ?assertEqual(false, filelib:is_file(Idx0File)),
   ?assertEqual(false, filelib:is_file(Seg0File)),
@@ -245,8 +245,8 @@ t_empty_seg_file(Config) when is_list(Config) ->
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Seg1File = gululog_name:mk_seg_name(Dir, 1),
-  ?assertEqual([{?OP_BACKEDUP, Idx1File},
-                {?OP_BACKEDUP, Seg1File}], RepairedFiles),
+  ?assertEqual([{?OP_DELETED, Idx1File},
+                {?OP_DELETED, Seg1File}], RepairedFiles),
   Idx1BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
   Seg1BackupFile = gululog_name:mk_seg_name(BackupDir, 1),
   %% assert segment 0 files are still there
@@ -282,8 +282,8 @@ t_empty_idx_file(Config) when is_list(Config) ->
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Seg1File = gululog_name:mk_seg_name(Dir, 1),
-  ?assertEqual([{?OP_BACKEDUP, Idx1File},
-                {?OP_BACKEDUP, Seg1File}], RepairedFiles),
+  ?assertEqual([{?OP_DELETED, Idx1File},
+                {?OP_DELETED, Seg1File}], RepairedFiles),
   Idx1BackupFile = gululog_name:mk_idx_name(BackupDir, 1),
   Seg1BackupFile = gululog_name:mk_seg_name(BackupDir, 1),
   %% assert segment 0 files are still there
