@@ -1,5 +1,5 @@
 
-.PHONY: compile rel tests
+.PHONY: compile rel ct doc
 
 all: compile
 
@@ -13,6 +13,9 @@ deps:
 
 clean:
 	$(REBAR) clean
+
+doc:
+	$(REBAR) doc
 
 ct: REBAR := TEST=1 $(REBAR)
 ct: deps compile

@@ -1,7 +1,8 @@
 %% @doc Log meta bytes.
-%% binary layout
-%% <<MetaCRC:32, HeaderCRC:32, BodyCRC:32, Meta/binary>>
-%% Where Meta = <<LogId:64, HeaderSize:32, BodySize:32>>
+%% Binary layout:
+%% `<<MetaCRC:32, HeaderCRC:32, BodyCRC:32, Meta/binary>>'
+%% Where Meta = `<<LogId:64, HeaderSize:32, BodySize:32>>'
+%% @end
 
 -module(gululog_meta).
 
