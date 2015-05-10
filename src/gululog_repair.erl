@@ -94,10 +94,8 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
       [gululog_file:delete(IdxFile, BackupDir),
        gululog_file:delete(SegFile, BackupDir)];
     {IdxPos, SegPos} ->
-      IsIdxRepaired = gululog_file:maybe_truncate(IdxFile, IdxPos, BackupDir),
-      IsSegRepaired = gululog_file:maybe_truncate(SegFile, SegPos, BackupDir),
-      [{?OP_TRUNCATED, IdxFile} || IsIdxRepaired] ++
-      [{?OP_TRUNCATED, SegFile} || IsSegRepaired]
+      gululog_file:maybe_truncate(IdxFile, IdxPos, BackupDir) ++
+      gululog_file:maybe_truncate(SegFile, SegPos, BackupDir)
   end.
 
 %% @private Scan from the latest log entry until integrity is found.

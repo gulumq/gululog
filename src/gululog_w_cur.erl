@@ -157,8 +157,7 @@ wildcard_reverse(Dir) -> gululog_name:wildcard_seg_name_reversed(Dir).
 -spec truncate_truncate_do(filename(), position(), dirname()) -> [file_op()].
 truncate_truncate_do(?undef, _Position, _BackupDir) -> [];
 truncate_truncate_do(SegFile, Position, BackupDir) ->
-  true = gululog_file:maybe_truncate(SegFile, Position, BackupDir),
-  [{?OP_TRUNCATED, SegFile}].
+  gululog_file:maybe_truncate(SegFile, Position, BackupDir).
 
 %% @private Delete segment files.
 %% It is very important to delete files in reversed order in order to keep
