@@ -133,27 +133,29 @@ truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
 %% 1. nothing to delete
 %% 2. the oldest is also the latest
 %% @end
--spec delete_oldest_seg(topic()) -> {false | segid(), topic()}.
-delete_oldest_seg(#topic{dir = Dir, idx = Idx} = Topic) ->
+-spec delete_oldest_seg(topic()) -> {[file_op()], topic()}.
+delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic) ->
   case gululog_idx:delete_oldest_seg(Dir, Idx) of
     {false, Idx} ->
-      {false, Topic};
+      {[], Topic};
     {SegIdToDelete, Idx} ->
-      SegIdToDelete = gululog_w_cur:delete_seg(Dir, SegIdToDelete),
-      {SegIdToDelete, Topic}
+      gululog_w_cur:delete_seg(Dir, Cur, SegIdToDelete),
+      {[?OP_DELETED], Topic}
   end.
 %% @doc Maybe backup up the oldest segment, then delete it
 %% return the segid that is deleted, return 'false' in case:
 %% 1. nothing to delete
 %% 2. the oldest is also the latest
 %% @end
-delete_oldest_seg(#topic{dir = Dir, idx = Idx} = Topic, BackupDir) ->
+-spec delete_oldest_seg(topic(), dirname()) ->
+        {[file_op()], topic()}.
+delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, BackupDir) ->
   case gululog_idx:delete_oldest_seg(Dir, Idx, BackupDir) of
     {false, Idx} ->
-      {false, Topic};
+      {[], Topic};
     {SegIdToDelete, Idx} ->
-      SegIdToDelete = gululog_w_cur:delete_seg(Dir, SegIdToDelete, BackupDir),
-      {SegIdToDelete, Topic}
+      gululog_w_cur:delete_seg(Dir, Cur, SegIdToDelete, BackupDir),
+      {[?OP_DELETED], Topic}
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================

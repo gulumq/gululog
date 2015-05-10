@@ -14,8 +14,8 @@
         , switch_append/5
         , next_log_position/1
         , truncate/5
-        , delete_seg/2
         , delete_seg/3
+        , delete_seg/4
         ]).
 
 -export_type([cursor/0]).
@@ -111,16 +111,17 @@ truncate(Dir, Cur, SegId, Position, BackupDir) ->
 %% @doc Delete segment file depends on given segid
 %% return the deleted segid
 %% @end
--spec delete_seg(dirname(), segid()) -> segid().
-delete_seg(Dir, SegId) ->
-  delete_seg(Dir, SegId, ?undef).
+-spec delete_seg(dirname(), cursor(), segid()) -> segid().
+delete_seg(Dir, Cur, SegId) ->
+  delete_seg(Dir, Cur, SegId, ?undef).
 
 %% @doc Delete segment file depends on given segid
 %% return the deleted segid
 %% backup the segment file when the given argument 'backupdir' is not '?undef'
 %% @end
--spec delete_seg(dirname(), segid(), ?undef | dirname()) -> segid().
-delete_seg(Dir, SegId, BackupDir) ->
+-spec delete_seg(dirname(), cursor(), segid(), ?undef | dirname()) -> segid().
+delete_seg(Dir, #wcur{segid = CurrentSegId}, SegId, BackupDir) ->
+  true = (CurrentSegId =/= SegId),
   gululog_file:delete(mk_name(Dir, SegId), BackupDir),
   SegId.
 

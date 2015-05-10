@@ -168,16 +168,16 @@ t_delete_oldest_seg(Config) when is_list(Config) ->
                       gululog_topic:force_switch(IdxIn)
                 end, gululog_topic:init(Dir, []), CaseList),
   %% first
-  ?assertEqual({0, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
   %% second
-  ?assertEqual({5, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)),
+  ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)),
   Expect = [gululog_name:mk_idx_name(BackupDir, 5),
             gululog_name:mk_seg_name(BackupDir, 5)],
   ?assertEqual(Expect, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
                                    ++ gululog_name:wildcard_seg_name_reversed(BackupDir))),
-  ?assertEqual({6, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
-  ?assertEqual({false, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
-  ?assertEqual({false, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)).
+  ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  ?assertEqual({[], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  ?assertEqual({[], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
