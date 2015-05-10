@@ -1,9 +1,8 @@
 %% @doc Log segment writer cursor.
-%%
 %% log entry binary layout
-%% [ <<Meta/binary>> %% see gululog_meta.erl
-%% , <<Header/binary, Body/binary>>
-%% ]
+%% `[ <<Meta/binary>>, <<Header/binary, Body/binary>> ]'
+%% See gululog_meta.erl for details about Meta
+%% @end
 
 -module(gululog_w_cur).
 

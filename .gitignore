@@ -5,4 +5,5 @@ logs
 test/gululog_ut_SUITE.erl
 .eunit/
 deps/
+doc/
 
