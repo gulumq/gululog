@@ -147,18 +147,10 @@ t_delete_oldest_seg(Config) when is_list(Config) ->
   BackupDir = filename:join(Dir, "backup"),
   CaseList =
     [ {append,       <<"key">>, <<"value">>} %% logid = 0, segid = 0
-    , {append,       <<"key">>, <<"value">>} %% logid = 1, segid = 0
-    , {append,       <<"key">>, <<"value">>} %% logid = 2, segid = 0
-    , {append,       <<"key">>, <<"value">>} %% logid = 3, segid = 0
-    , {append,       <<"key">>, <<"value">>} %% logid = 4, segid = 0
     , force_switch
-    , {append,       <<"key">>, <<"value">>} %% logid = 5, segid = 5
+    , {append,       <<"key">>, <<"value">>} %% logid = 1, segid = 1
     , force_switch
-    , {append,       <<"key">>, <<"value">>} %% logid = 6, segid = 6
-    , {append,       <<"key">>, <<"value">>} %% logid = 7, segid = 6
-    , {append,       <<"key">>, <<"value">>} %% logid = 8, segid = 6
-    , force_switch
-    , {append,       <<"key">>, <<"value">>} %% logid = 9, segid = 7
+    , {append,       <<"key">>, <<"value">>} %% logid = 2, segid = 2
     ],
   %% generate test case data
   InitTopic = lists:foldl(
@@ -171,11 +163,10 @@ t_delete_oldest_seg(Config) when is_list(Config) ->
   ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
   %% second
   ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)),
-  Expect = [gululog_name:mk_idx_name(BackupDir, 5),
-            gululog_name:mk_seg_name(BackupDir, 5)],
+  Expect = [gululog_name:mk_idx_name(BackupDir, 1),
+            gululog_name:mk_seg_name(BackupDir, 1)],
   ?assertEqual(Expect, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
                                    ++ gululog_name:wildcard_seg_name_reversed(BackupDir))),
-  ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
   ?assertEqual({[], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
   ?assertEqual({[], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)).
 
