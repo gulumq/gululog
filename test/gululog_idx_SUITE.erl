@@ -50,12 +50,14 @@ t_basic_flow(Config) when is_list(Config) ->
   Dir = ?config(dir),
   Index0 = gululog_idx:init(Dir),
   ?assertEqual(false, gululog_idx:get_latest_logid(Index0)),
-  Index0 = gululog_idx:append(Index0, 0, 1),
-  Index0 = gululog_idx:append(Index0, 1, 10),
-  Index0 = gululog_idx:append(Index0, 2, 40),
-  Index3 = gululog_idx:switch_append(Dir, Index0, 3, 1),
-  Index4 = gululog_idx:switch_append(Dir, Index3, 4, 1),
-  Index  = gululog_idx:switch(Dir, Index4, _NexLogId = 5),
+  Events = [ {append, 0, 1}
+           , {append, 1, 10}
+           , {append, 2, 40}
+           , {switch_append, 3, 1}
+           , {switch_append, 4, 1}
+           ],
+  Idx0 = init_idx(Dir, Events),
+  Idx1 = gululog_idx:switch(Dir, Idx0, _NexLogId = 5),
   Expects = [ {0, {0, 1}}
             , {1, {0, 10}}
             , {2, {0, 40}}
@@ -64,33 +66,33 @@ t_basic_flow(Config) when is_list(Config) ->
             , {5, false}
             ],
   lists:foreach(fun({LogId, ExpectedLocation}) ->
-                  Location = gululog_idx:locate(Dir, Index, LogId),
+                  Location = gululog_idx:locate(Dir, Idx1, LogId),
                   ?assertEqual(ExpectedLocation, Location)
                 end, Expects),
-  ?assertMatch(4, gululog_idx:get_latest_logid(Index)),
+  ?assertMatch(4, gululog_idx:get_latest_logid(Idx1)),
   %% delete segment 0
-  ?assertMatch({0, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
+  {Idx2, {0, _}} = gululog_idx:delete_oldest_seg(Dir, Idx1, ?undef),
   %% delete segment 3
-  ?assertMatch({3, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
+  {Idx3, {3, _}} = gululog_idx:delete_oldest_seg(Dir, Idx2, ?undef),
   %% verify that segment 4 is still there
-  ?assertMatch(4, gululog_idx:get_latest_logid(Index)),
+  ?assertMatch(4, gululog_idx:get_latest_logid(Idx3)),
   %% delete segment 4
-  ?assertMatch({4, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
+  {Idx4, {4, _}} = gululog_idx:delete_oldest_seg(Dir, Idx3, ?undef),
   %% nothing left (segment 5 is empty)
-  ?assertMatch({false, _}, gululog_idx:delete_oldest_seg(Dir, Index)),
+  {Idx5, false} = gululog_idx:delete_oldest_seg(Dir, Idx4, ?undef),
   %% verify nothing left
-  ?assertMatch(false, gululog_idx:get_latest_logid(Index)),
-  ok.
+  ?assertMatch(false, gululog_idx:get_latest_logid(Idx5)),
+  ok = gululog_idx:flush_close(Idx5).
 
 %% @doc Init from existing files.
 t_init_from_existing({init, Config}) ->
   Dir = ?config(dir),
-  Index0 = gululog_idx:init(Dir),
-  Index0 = gululog_idx:append(Index0, 0, 1),
-  Index0 = gululog_idx:append(Index0, 1, 10),
-  Index1 = gululog_idx:switch_append(Dir, Index0, 2, 3),
-  Index1 = gululog_idx:append(Index1, 3, 50),
-  ok = gululog_idx:flush_close(Index1),
+  Idx = init_idx(Dir, [ {append,        0, 1}
+                      , {append,        1, 10}
+                      , {switch_append, 2, 3}
+                      , {append,        3, 50}
+                      ]),
+  ok = gululog_idx:flush_close(Idx),
   Config;
 t_init_from_existing({'end', _Config}) -> ok;
 t_init_from_existing(Config) when is_list(Config) ->
@@ -115,12 +117,13 @@ t_init_from_existing(Config) when is_list(Config) ->
 %% @doc Delete log entry from index cache, scan idx file to locate.
 t_scan_file_to_locate({init, Config}) ->
   Dir = ?config(dir),
-  Idx0 = gululog_idx:init(Dir),
-  Idx1 = gululog_idx:append(Idx0, 0, 1),
-  Idx2 = gululog_idx:append(Idx1, 1, 10),
-  Idx3 = gululog_idx:append(Idx2, 2, 20),
-  Idx4 = gululog_idx:append(Idx3, 3, 32),
-  ok = gululog_idx:flush_close(Idx4),
+  Events = [ {append, 0, 1}
+           , {append, 1, 10}
+           , {append, 2, 20}
+           , {append, 3, 32}
+           ],
+  Idx = init_idx(Dir, Events),
+  ok = gululog_idx:flush_close(Idx),
   Config;
 t_scan_file_to_locate({'end', _Config}) -> ok;
 t_scan_file_to_locate(Config) when is_list(Config) ->
@@ -137,6 +140,18 @@ t_scan_file_to_locate(Config) when is_list(Config) ->
   ?assertEqual({0, 32}, gululog_idx:locate(Dir, Idx2, 3)),
   ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
   ok.
+
+%%%_* Help functions ===========================================================
+
+init_idx(Dir, Events) -> init_idx(Dir, gululog_idx:init(Dir), Events).
+
+init_idx(_Dir, Idx, []) -> Idx;
+init_idx(Dir, Idx, [{append, LogId, Pos} | Events]) ->
+  NewIdx = gululog_idx:append(Idx, LogId, Pos),
+  init_idx(Dir, NewIdx, Events);
+init_idx(Dir, Idx, [{switch_append, LogId, Pos} | Events]) ->
+  NewIdx = gululog_idx:switch_append(Dir, Idx, LogId, Pos),
+  init_idx(Dir, NewIdx, Events).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

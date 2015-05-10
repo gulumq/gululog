@@ -7,6 +7,8 @@
         , close/1
         , force_switch/1
         , truncate/3
+        , delete_oldest_seg/1
+        , delete_oldest_seg/2
         ]).
 
 -export_type([topic/0]).
@@ -124,6 +126,29 @@ truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
       NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
       {maybe_switch_to_new_version(NewTopic),
        IdxFileOpList ++ SegFileOpList}
+  end.
+
+%% @equiv delete_oldest_seg/2
+-spec delete_oldest_seg(topic()) -> {topic(), [file_op()]}.
+delete_oldest_seg(Topic) -> delete_oldest_seg(Topic, ?undef).
+
+%% @doc Delete oldest segment from topic.
+%% Return new topic and a list of deleted files with OP tags.
+%% The delete is ignored, (return empty file list) when:
+%% 1. Nothing to delete, topic is empty
+%% 2. The oldest segment is also the newest
+%%    --- This is considered purging the entrir topic, should be done using
+%%        truncation API instead
+%% @end
+-spec delete_oldest_seg(topic(), dirname()) -> {topic(), [file_op()]}.
+delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, BackupDir) ->
+  case gululog_idx:delete_oldest_seg(Dir, Idx, BackupDir) of
+    {NewIdx, false} ->
+      %% ignored
+      {Topic#topic{idx = NewIdx}, []};
+    {NewIdx, {SegId, IdxFileOp}} ->
+      {NewCur, SegFileOp} = gululog_w_cur:delete_seg(Dir, Cur, SegId, BackupDir),
+      {Topic#topic{idx = NewIdx, cur = NewCur}, [IdxFileOp, SegFileOp]}
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================

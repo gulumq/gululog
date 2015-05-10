@@ -14,6 +14,7 @@
         , switch_append/5
         , next_log_position/1
         , truncate/5
+        , delete_seg/4
         ]).
 
 -export_type([cursor/0]).
@@ -105,6 +106,16 @@ truncate(Dir, Cur, SegId, Position, BackupDir) ->
   DeleteResult = truncate_delete_do(DeleteFiles, BackupDir),
   TruncateResult = truncate_truncate_do(TruncateFile, Position, BackupDir),
   {open_do(Dir, KeepFiles), DeleteResult ++ TruncateResult}.
+
+%% @doc Delete segment file for the given segid.
+%% Return new curosr() and the delete file with OP tag
+%% File is backedup if backup dir is given.
+%% @end
+-spec delete_seg(dirname(), cursor(), segid(), ?undef | dirname()) ->
+        {cursor(), file_op()}.
+delete_seg(Dir, #wcur{segid = CurrentSegId} = Cur, SegId, BackupDir) ->
+  true = (CurrentSegId =/= SegId), %% assert
+  {Cur, gululog_file:delete(mk_name(Dir, SegId), BackupDir)}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
