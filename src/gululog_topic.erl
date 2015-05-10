@@ -7,6 +7,8 @@
         , close/1
         , force_switch/1
         , truncate/3
+        , delete_oldest_seg/1
+        , delete_oldest_seg/2
         ]).
 
 -export_type([topic/0]).
@@ -124,6 +126,34 @@ truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
       NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
       {maybe_switch_to_new_version(NewTopic),
        IdxFileOpList ++ SegFileOpList}
+  end.
+
+%% @doc Delete oldest segment
+%% return the segid that is deleted, return 'false' in case:
+%% 1. nothing to delete
+%% 2. the oldest is also the latest
+%% @end
+-spec delete_oldest_seg(topic()) -> {false | segid(), topic()}.
+delete_oldest_seg(#topic{dir = Dir, idx = Idx} = Topic) ->
+  case gululog_idx:delete_oldest_seg(Dir, Idx) of
+    {false, Idx} ->
+      {false, Topic};
+    {SegIdToDelete, Idx} ->
+      SegIdToDelete = gululog_w_cur:delete_seg(Dir, SegIdToDelete),
+      {SegIdToDelete, Topic}
+  end.
+%% @doc Maybe backup up the oldest segment, then delete it
+%% return the segid that is deleted, return 'false' in case:
+%% 1. nothing to delete
+%% 2. the oldest is also the latest
+%% @end
+delete_oldest_seg(#topic{dir = Dir, idx = Idx} = Topic, BackupDir) ->
+  case gululog_idx:delete_oldest_seg(Dir, Idx, BackupDir) of
+    {false, Idx} ->
+      {false, Topic};
+    {SegIdToDelete, Idx} ->
+      SegIdToDelete = gululog_w_cur:delete_seg(Dir, SegIdToDelete, BackupDir),
+      {SegIdToDelete, Topic}
   end.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================

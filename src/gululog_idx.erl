@@ -12,6 +12,7 @@
         , switch/3            %% switch to a new segment
         , switch_append/4     %% switch then append
         , delete_oldest_seg/2 %% Delete oldest segment from index
+        , delete_oldest_seg/3 %% Delete oldest segment from index, backup it first if necessary
         , delete_from_cache/2 %% Delete given log entry from index cache
         , truncate/5          %% Truncate cache and file from the given logid (inclusive)
         ]).
@@ -121,12 +122,24 @@ append(#idx{ version = ?LOGVSN
 %%    should be done using truncate API instead.
 %% @end
 -spec delete_oldest_seg(dirname(), index()) -> {segid() | false, index()}.
-delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index) ->
+delete_oldest_seg(Dir, Index) ->
+  delete_oldest_seg(Dir, Index, ?undef).
+
+%% @doc Delete oldest segment from index
+%% backup the index file when given argument 'backupdir' is not '?undef'
+%% return the segid that is deleted, return 'false' in case:
+%% 1. nothing to delete
+%% 2. the oldest is also the latest, it is considered as purging the entire log
+%%    should be done using truncate API instead.
+%% @end
+-spec delete_oldest_seg(dirname(), index(), ?undef | dirname()) ->
+        {segid() | false, index()}.
+delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index, BackupDir) ->
   case get_oldest_segid(Index) of
     SegIdToDelete when is_integer(SegIdToDelete) andalso SegIdToDelete < CurrentSegId ->
       Ms = ets:fun2ms(fun(?ETS_ENTRY(SegId, _, _)) -> SegId =:= SegIdToDelete end),
       _ = ets:select_delete(Tid, Ms),
-      ok = file:delete(mk_name(Dir, SegIdToDelete)),
+      gululog_file:delete(mk_name(Dir, SegIdToDelete), BackupDir),
       {SegIdToDelete, Index};
     _ ->
       {false, Index}
@@ -540,6 +553,21 @@ gululog_idx_test_() ->
           ?assertEqual([], ets:tab2list(NewEtsTable)),
           ok = flush_close(NewIdx),
           ok
+        end
+      }
+    , { "delete oldest seg"
+      , fun() ->
+          Dir = test_dir(),
+          BackupDir = filename:join(Dir, "backup"),
+          Idx0 = init(Dir),
+          ?assertEqual({0, Idx0}, delete_oldest_seg(Dir, Idx0)),
+          DeleteFile1 = mk_name(Dir, 0),
+          ?assertEqual(false, lists:member(DeleteFile1, wildcard_reversed(Dir))),
+          ?assertEqual({5, Idx0}, delete_oldest_seg(Dir, Idx0, BackupDir)),
+          ?assertEqual([mk_name(BackupDir, 5)], wildcard_reversed(BackupDir)),
+          DeleteFile2 = mk_name(Dir, 5),
+          ?assertEqual(false, lists:member(DeleteFile2, wildcard_reversed(Dir))),
+          ?assertEqual({false, Idx0}, delete_oldest_seg(Dir, Idx0))
         end
       }
     , { "delete old seg + truncate"

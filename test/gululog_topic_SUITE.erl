@@ -16,6 +16,7 @@
 %% cases
 -export([ t_basic_flow/1
         , t_truncate/1
+        , t_delete_oldest_seg/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -136,6 +137,47 @@ t_truncate(Config) when is_list(Config) ->
              gululog_name:mk_seg_name(BackupDir, 6)],
   ?assertEqual(Expect1, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
                                    ++ gululog_name:wildcard_seg_name_reversed(BackupDir))).
+
+t_delete_oldest_seg({'init', Config}) ->
+  Config;
+t_delete_oldest_seg({'end', _Config}) ->
+  ok;
+t_delete_oldest_seg(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  BackupDir = filename:join(Dir, "backup"),
+  CaseList =
+    [ {append,       <<"key">>, <<"value">>} %% logid = 0, segid = 0
+    , {append,       <<"key">>, <<"value">>} %% logid = 1, segid = 0
+    , {append,       <<"key">>, <<"value">>} %% logid = 2, segid = 0
+    , {append,       <<"key">>, <<"value">>} %% logid = 3, segid = 0
+    , {append,       <<"key">>, <<"value">>} %% logid = 4, segid = 0
+    , force_switch
+    , {append,       <<"key">>, <<"value">>} %% logid = 5, segid = 5
+    , force_switch
+    , {append,       <<"key">>, <<"value">>} %% logid = 6, segid = 6
+    , {append,       <<"key">>, <<"value">>} %% logid = 7, segid = 6
+    , {append,       <<"key">>, <<"value">>} %% logid = 8, segid = 6
+    , force_switch
+    , {append,       <<"key">>, <<"value">>} %% logid = 9, segid = 7
+    ],
+  %% generate test case data
+  InitTopic = lists:foldl(
+                fun({append, Header, Body}, IdxIn) ->
+                      gululog_topic:append(IdxIn, Header, Body);
+                   (force_switch, IdxIn) ->
+                      gululog_topic:force_switch(IdxIn)
+                end, gululog_topic:init(Dir, []), CaseList),
+  %% first
+  ?assertEqual({0, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  %% second
+  ?assertEqual({5, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)),
+  Expect = [gululog_name:mk_idx_name(BackupDir, 5),
+            gululog_name:mk_seg_name(BackupDir, 5)],
+  ?assertEqual(Expect, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
+                                   ++ gululog_name:wildcard_seg_name_reversed(BackupDir))),
+  ?assertEqual({6, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  ?assertEqual({false, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  ?assertEqual({false, InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
