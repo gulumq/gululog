@@ -54,11 +54,12 @@ t_basic_flow(Config) when is_list(Config) ->
   T3 = gululog_topic:append(T2, <<"header2">>, Body($2)),
   ok = gululog_topic:close(T3),
   T4 = gululog_topic:init(Dir, [{segMB, 1}]),
-  _T5 = gululog_topic:append(T4, <<"header3">>, Body($3)),
-  Files = [ gululog_name:mk_idx_name(Dir, 0)
-          , gululog_name:mk_idx_name(Dir, 2)
-          , gululog_name:mk_seg_name(Dir, 0)
-          , gululog_name:mk_seg_name(Dir, 2)
+  T5 = gululog_topic:append(T4, <<"header3">>, Body($3)),
+  ok = gululog_topic:close(T5),
+  Files = [ idx_name(Dir, 0)
+          , idx_name(Dir, 2)
+          , seg_name(Dir, 0)
+          , seg_name(Dir, 2)
           ],
   lists:foreach(
     fun(File) ->
@@ -116,29 +117,30 @@ t_truncate(Config) when is_list(Config) ->
   {T15, Result1} = gululog_topic:truncate(T14, 10, ?undef),
   ?assertEqual([], Result1),
   {T16, Result4} = gululog_topic:truncate(T15, 7, ?undef),
-  ?assertEqual([{?OP_DELETED,   gululog_name:mk_idx_name(Dir, 9)},
-                {?OP_DELETED,   gululog_name:mk_seg_name(Dir, 9)},
-                {?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 6)},
-                {?OP_TRUNCATED, gululog_name:mk_seg_name(Dir, 6)}], lists:sort(Result4)),
+  ?assertEqual([{?OP_DELETED,   idx_name(Dir, 9)},
+                {?OP_DELETED,   seg_name(Dir, 9)},
+                {?OP_TRUNCATED, idx_name(Dir, 6)},
+                {?OP_TRUNCATED, seg_name(Dir, 6)}], lists:sort(Result4)),
   {T17, Result5} = gululog_topic:truncate(T16, 5, BackupDir),
-  ?assertEqual([{?OP_DELETED, gululog_name:mk_idx_name(Dir, 5)},
-                {?OP_DELETED, gululog_name:mk_seg_name(Dir, 5)},
-                {?OP_DELETED, gululog_name:mk_idx_name(Dir, 6)},
-                {?OP_DELETED, gululog_name:mk_seg_name(Dir, 6)}], lists:sort(Result5)),
-  {_T18, Result6} = gululog_topic:truncate(T17, 3, BackupDir),
-  Expect = [{?OP_TRUNCATED, gululog_name:mk_idx_name(Dir, 0)},
-            {?OP_TRUNCATED, gululog_name:mk_seg_name(Dir, 0)}],
+  ?assertEqual([{?OP_DELETED, idx_name(Dir, 5)},
+                {?OP_DELETED, seg_name(Dir, 5)},
+                {?OP_DELETED, idx_name(Dir, 6)},
+                {?OP_DELETED, seg_name(Dir, 6)}], lists:sort(Result5)),
+  {T18, Result6} = gululog_topic:truncate(T17, 3, BackupDir),
+  Expect = [{?OP_TRUNCATED, idx_name(Dir, 0)},
+            {?OP_TRUNCATED, seg_name(Dir, 0)}],
   ?assertEqual(Expect, lists:sort(Result6)),
-  Expect1 = [gululog_name:mk_idx_name(BackupDir, 0),
-             gululog_name:mk_seg_name(BackupDir, 0),
-             gululog_name:mk_idx_name(BackupDir, 5),
-             gululog_name:mk_seg_name(BackupDir, 5),
-             gululog_name:mk_idx_name(BackupDir, 6),
-             gululog_name:mk_seg_name(BackupDir, 6)],
+  Expect1 = [idx_name(BackupDir, 0),
+             seg_name(BackupDir, 0),
+             idx_name(BackupDir, 5),
+             seg_name(BackupDir, 5),
+             idx_name(BackupDir, 6),
+             seg_name(BackupDir, 6)],
   ?assertEqual(Expect1, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
-                                   ++ gululog_name:wildcard_seg_name_reversed(BackupDir))).
+                                   ++ gululog_name:wildcard_seg_name_reversed(BackupDir))),
+  ok = gululog_topic:close(T18).
 
-t_delete_oldest_seg({'init', Config}) ->
+t_delete_oldest_seg({init, Config}) ->
   Config;
 t_delete_oldest_seg({'end', _Config}) ->
   ok;
@@ -153,22 +155,33 @@ t_delete_oldest_seg(Config) when is_list(Config) ->
     , {append,       <<"key">>, <<"value">>} %% logid = 2, segid = 2
     ],
   %% generate test case data
-  InitTopic = lists:foldl(
-                fun({append, Header, Body}, IdxIn) ->
-                      gululog_topic:append(IdxIn, Header, Body);
-                   (force_switch, IdxIn) ->
-                      gululog_topic:force_switch(IdxIn)
-                end, gululog_topic:init(Dir, []), CaseList),
+  T0 = lists:foldl(
+         fun({append, Header, Body}, IdxIn) ->
+               gululog_topic:append(IdxIn, Header, Body);
+            (force_switch, IdxIn) ->
+               gululog_topic:force_switch(IdxIn)
+         end, gululog_topic:init(Dir, []), CaseList),
   %% first
-  ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
+  {T1, FileOps1} = gululog_topic:delete_oldest_seg(T0),
+  ?assertEqual([{?OP_DELETED, idx_name(Dir, 0)},
+                {?OP_DELETED, seg_name(Dir, 0)}], FileOps1),
   %% second
-  ?assertEqual({[?OP_DELETED], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)),
-  Expect = [gululog_name:mk_idx_name(BackupDir, 1),
-            gululog_name:mk_seg_name(BackupDir, 1)],
+  {T2, FileOps2} = gululog_topic:delete_oldest_seg(T1, BackupDir),
+  ?assertEqual([{?OP_DELETED, idx_name(Dir, 1)},
+                {?OP_DELETED, seg_name(Dir, 1)}], FileOps2),
+  Expect = [idx_name(BackupDir, 1),
+            seg_name(BackupDir, 1)],
   ?assertEqual(Expect, lists:sort(gululog_name:wildcard_idx_name_reversed(BackupDir)
                                    ++ gululog_name:wildcard_seg_name_reversed(BackupDir))),
-  ?assertEqual({[], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic)),
-  ?assertEqual({[], InitTopic}, gululog_topic:delete_oldest_seg(InitTopic, BackupDir)).
+  {T3, FileOps3} = gululog_topic:delete_oldest_seg(T2),
+  ?assertEqual([], FileOps3),
+  ok = gululog_topic:close(T3).
+
+%%%_* Help functions ===========================================================
+
+idx_name(Dir, SegId) -> gululog_name:mk_idx_name(Dir, SegId).
+
+seg_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:

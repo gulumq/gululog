@@ -11,7 +11,6 @@
         , append/3            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
         , switch_append/4     %% switch then append
-        , delete_oldest_seg/2 %% Delete oldest segment from index
         , delete_oldest_seg/3 %% Delete oldest segment from index, backup it first if necessary
         , delete_from_cache/2 %% Delete given log entry from index cache
         , truncate/5          %% Truncate cache and file from the given logid (inclusive)
@@ -115,34 +114,26 @@ append(#idx{ version = ?LOGVSN
   ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
   Idx.
 
-%% @doc Delete oldest segment from index
-%% return the segid that is deleted, return 'false' in case:
-%% 1. nothing to delete
-%% 2. the oldest is also the latest, it is considered as purging the entire log
+%% @doc Delete oldest segment from index.
+%% Return the new index and the deleted file with OP tag
+%% Return 'false' instead of file with OP tag when:
+%% 1. Nothing to delete
+%% 2. The oldest is also the latest, it is considered purging the entire topic
 %%    should be done using truncate API instead.
-%% @end
--spec delete_oldest_seg(dirname(), index()) -> {segid() | false, index()}.
-delete_oldest_seg(Dir, Index) ->
-  delete_oldest_seg(Dir, Index, ?undef).
-
-%% @doc Delete oldest segment from index
-%% backup the index file when given argument 'backupdir' is not '?undef'
-%% return the segid that is deleted, return 'false' in case:
-%% 1. nothing to delete
-%% 2. the oldest is also the latest, it is considered as purging the entire log
-%%    should be done using truncate API instead.
+%% File is backed up in case backup dir is given.
 %% @end
 -spec delete_oldest_seg(dirname(), index(), ?undef | dirname()) ->
-        {segid() | false, index()}.
+        {index(), false | {segid(), file_op()}}.
 delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index, BackupDir) ->
   case get_oldest_segid(Index) of
-    SegIdToDelete when is_integer(SegIdToDelete) andalso SegIdToDelete < CurrentSegId ->
+    SegIdToDelete when is_integer(SegIdToDelete) andalso
+                       SegIdToDelete < CurrentSegId ->
       Ms = ets:fun2ms(fun(?ETS_ENTRY(SegId, _, _)) -> SegId =:= SegIdToDelete end),
       _ = ets:select_delete(Tid, Ms),
-      gululog_file:delete(mk_name(Dir, SegIdToDelete), BackupDir),
-      {SegIdToDelete, Index};
+      FileOp = gululog_file:delete(mk_name(Dir, SegIdToDelete), BackupDir),
+      {Index, {SegIdToDelete, FileOp}};
     _ ->
-      {false, Index}
+      {Index, false}
   end.
 
 %% @doc Switch to a new log segment
@@ -560,21 +551,21 @@ gululog_idx_test_() ->
           Dir = test_dir(),
           BackupDir = filename:join(Dir, "backup"),
           Idx0 = init(Dir),
-          ?assertEqual({0, Idx0}, delete_oldest_seg(Dir, Idx0)),
           DeleteFile1 = mk_name(Dir, 0),
+          ?assertEqual({Idx0, {0, {?OP_DELETED, DeleteFile1}}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           ?assertEqual(false, lists:member(DeleteFile1, wildcard_reversed(Dir))),
-          ?assertEqual({5, Idx0}, delete_oldest_seg(Dir, Idx0, BackupDir)),
-          ?assertEqual([mk_name(BackupDir, 5)], wildcard_reversed(BackupDir)),
           DeleteFile2 = mk_name(Dir, 5),
+          ?assertEqual({Idx0, {5, {?OP_DELETED, DeleteFile2}}}, delete_oldest_seg(Dir, Idx0, BackupDir)),
+          ?assertEqual([mk_name(BackupDir, 5)], wildcard_reversed(BackupDir)),
           ?assertEqual(false, lists:member(DeleteFile2, wildcard_reversed(Dir))),
-          ?assertEqual({false, Idx0}, delete_oldest_seg(Dir, Idx0))
+          ?assertEqual({Idx0, false}, delete_oldest_seg(Dir, Idx0, ?undef))
         end
       }
     , { "delete old seg + truncate"
       , fun() ->
           Dir = test_dir(),
           Idx0 = init(Dir),
-          ?assertMatch({0, _}, delete_oldest_seg(Dir, Idx0)),
+          ?assertMatch({_, {0, _}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           Files = lists:sort(wildcard_reversed(Dir)),
           {Idx1, Truncated} = truncate(Dir, Idx0, 5, 5, ?undef),
           FilesDeleted = lists:sort(lists:map(fun({?OP_DELETED, Fn}) -> Fn end, Truncated)),
