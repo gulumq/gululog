@@ -17,6 +17,9 @@ clean:
 doc:
 	$(REBAR) doc
 
+xref:
+	$(REBAR) xref
+
 ct: REBAR := TEST=1 $(REBAR)
 ct: deps compile
 	$(REBAR) skip_deps=true ct
