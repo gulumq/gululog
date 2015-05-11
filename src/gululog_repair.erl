@@ -74,7 +74,7 @@ repair_dir(IdxFiles, SegFiles, BackupDir) ->
 %% an truncation is done for the index file as well.
 %% @end
 -spec repair_seg([filename()], [filename()], dirname(), ?undef | dirname()) ->
-        no_return().
+        [file_op()].
 repair_seg([], [], _Dir, _BackupDir) -> [];
 repair_seg([IdxFile | _], [SegFile | _], Dir, BackupDir) ->
   IndexCache = gululog_idx:init_cache([IdxFile]),

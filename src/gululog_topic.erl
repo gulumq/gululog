@@ -129,7 +129,7 @@ truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
   end.
 
 %% @equiv delete_oldest_seg/2
--spec delete_oldest_seg(topic()) -> no_return().
+-spec delete_oldest_seg(topic()) -> {topic(), [file_op()]}.
 delete_oldest_seg(Topic) -> delete_oldest_seg(Topic, ?undef).
 
 %% @doc Delete oldest segment from topic.

@@ -36,7 +36,7 @@
 -include("gululog_priv.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
--opaque cache() :: ets:tid() | atom().
+-type cache() :: ets:tid().
 
 -record(idx, { version :: logvsn()
              , segid   :: segid()
