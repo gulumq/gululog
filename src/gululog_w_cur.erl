@@ -39,13 +39,13 @@
 next_log_position(#wcur{position = Position}) -> Position.
 
 %% @doc Open the last segment file the given directory for writer to append.
--spec open(dirname()) -> cursor() | no_return().
+-spec open(dirname()) -> cursor().
 open(Dir) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
   open_do(Dir, wildcard_reverse(Dir)).
 
 %% @doc Flush os disk cache, close fd.
--spec flush_close(cursor()) -> ok | no_return().
+-spec flush_close(cursor()) -> ok.
 flush_close(#wcur{fd = Fd}) ->
   ok = file:sync(Fd),
   ok = file:close(Fd).

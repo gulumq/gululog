@@ -63,7 +63,7 @@ init(Options) ->
   Dir = keyget(key, Options),
   SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
   gen_server:cast(self(), post_init),
-  #state{dir = Dir, segMB = SegMB}.
+  {ok, #state{dir = Dir, segMB = SegMB}}.
 
 handle_cast(post_init, #state{} = State) ->
   NewState = do_init(State),
@@ -79,11 +79,11 @@ handle_call(_Call, _From, State) ->
 handle_info(_Info, State) ->
   {noreply, State}.
 
-terminate(_Reason, #state{index = Index, w_cur = W_cur} = State) ->
+terminate(_Reason, #state{index = Index, w_cur = W_cur} = _State) ->
   ok = maybe_close_index(Index),
   ok = maybe_close_w_cur(W_cur),
-  NewState = State#state{index = ?undef, w_cur = unfefined},
-  {ok, NewState}.
+  %% NewState = State#state{index = ?undef, w_cur = unfefined},
+  ok.
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
@@ -120,7 +120,7 @@ maybe_close_index(Index)  -> gululog_idx:flush_close(Index).
 
 -spec maybe_close_w_cur(?undef | w_cur()) -> ok.
 maybe_close_w_cur(?undef) -> ok;
-maybe_close_w_cur(W_cur)  -> gululog_idx:flush_close(W_cur).
+maybe_close_w_cur(W_cur)  -> gululog_w_cur:flush_close(W_cur).
 
 %%%*_ TESTS ====================================================================
 

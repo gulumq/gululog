@@ -36,7 +36,7 @@
 -include("gululog_priv.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
--opaque cache() :: ets:tid().
+-type cache() :: ets:tid().
 
 -record(idx, { version :: logvsn()
              , segid   :: segid()
@@ -65,7 +65,7 @@
 %% The directory is created if not exists already
 %% New index file is initialized if the given directry is empty
 %% @end
--spec init(dirname()) -> index() | {error, no_return()}.
+-spec init(dirname()) -> index().
 init(Dir) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
   {IsNew, IndexFiles} = case wildcard_reversed(Dir) of
@@ -104,7 +104,7 @@ flush_close(#idx{fd = Fd, tid = Tid}) ->
 %% 2. LogId should be monotonic. i.e. NewLogId >= LatestLogId + 1
 %% 3. Position should be (at least MIN_LOG_SIZE) greater than the latest position
 %% @end
--spec append(index(), logid(), position()) -> index() | no_return().
+-spec append(index(), logid(), position()) -> index().
 append(#idx{ version = ?LOGVSN
            , segid   = SegId
            , fd      = Fd
@@ -155,7 +155,7 @@ switch_append(Dir, Idx, LogId, Position) ->
 %% return 'false' if not in valid range
 %% @end
 -spec locate(dirname(), index() | cache(), logid()) ->
-        {segid(), position()} | false | no_return().
+        {segid(), position()} | false.
 locate(Dir, #idx{tid = Tid}, LogId) ->
   locate(Dir, Tid, LogId);
 locate(Dir, Tid, LogId) ->
@@ -177,7 +177,7 @@ locate(Dir, Tid, LogId) ->
 %% return {segid(), position()} from cached records
 %% @end
 -spec locate_in_cache(cache(), logid()) ->
-        {segid(), position()} | false | no_return().
+        {segid(), position()} | false.
 locate_in_cache(Tid, LogId) ->
   case ets:lookup(Tid, LogId) of
     []                                   -> false;
@@ -245,7 +245,7 @@ delete_from_cache(Tid, LogId) ->
 %% Return new index(), the truncated segid, and a list of deleted segids
 %% @end
 -spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
-        {index(), ?undef | segid(), [segid()]}.
+        {index(), [file_op()]}.
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   false = is_out_of_range(Tid, LogId), %% assert
   %% Find all the Segids that are greater than the given segid -- to be deleted
@@ -297,7 +297,7 @@ truncate_cache(Tid, LogId) ->
 %% This function is called only when ets cache is not hit
 %% @end
 -spec scan_locate(dirname(), segid(), logid()) ->
-        {segid(), position()} | no_return().
+        {segid(), position()}.
 scan_locate(Dir, SegId, LogId) ->
   true = (LogId > SegId), %% assert
   FileName = mk_name(Dir, SegId),
@@ -310,7 +310,7 @@ scan_locate(Dir, SegId, LogId) ->
   end.
 
 -spec scan_locate_per_vsn(file:fd(), segid(), logid(), logvsn()) ->
-        {segid(), position()} | no_return().
+        {segid(), position()}.
 scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
   %% The offset caculate by per-entry size + one byte version
   Location = (LogId - SegId) * ?FILE_ENTRY_BYTES_V1 + 1,
@@ -333,7 +333,7 @@ is_out_of_range(Tid, LogId) ->
 %% @private Create ets table to keep the index entries.
 %% TODO: less indexing for earlier segments in case there are too many entries.
 %% @end
--spec init_ets_from_index_files(cache(), [filename()]) -> ok | no_return().
+-spec init_ets_from_index_files(cache(), [filename()]) -> ok.
 init_ets_from_index_files(_Tid, []) -> ok;
 init_ets_from_index_files(Tid, [FileName | Rest]) ->
   SegId = gululog_name:filename_to_segid(FileName),
@@ -351,7 +351,7 @@ init_ets_from_index_files(Tid, [FileName | Rest]) ->
       init_ets_from_index_files(Tid, Rest)
   end.
 
--spec init_ets_from_index_file(logvsn(), cache(), segid(), file:fd()) -> ok | no_return().
+-spec init_ets_from_index_file(logvsn(), cache(), segid(), file:fd()) -> ok.
 init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
   case file:read(Fd, ?FILE_ENTRY_BYTES_V1 * ?FILE_READ_CHUNK) of
     eof ->
@@ -369,7 +369,7 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 wildcard_reversed(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
--spec open_writer_fd(IsNew :: boolean(), filename()) -> file:fd() | no_return().
+-spec open_writer_fd(IsNew :: boolean(), filename()) -> {logvsn(), file:fd()}.
 open_writer_fd(true, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   ok = file:write(Fd, <<?LOGVSN:8>>),
@@ -388,7 +388,7 @@ open_writer_fd(false, FileName) ->
 file_entry_bytes(1) -> ?FILE_ENTRY_BYTES_V1.
 
 %% @private Open 'raw' mode fd for reader.
--spec open_reader_fd(filename()) -> file:fd() | no_return().
+-spec open_reader_fd(filename()) -> file:fd().
 open_reader_fd(FileName) ->
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
   Fd.

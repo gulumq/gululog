@@ -61,6 +61,7 @@ open(Dir, SegId) ->
 close(#rcur{fd = Fd}) -> file:close(Fd).
 
 %% @doc Read one log including head and body.
+-spec read(cursor()) -> {cursor(), log()} | eof.
 read(Cur) -> read(Cur, []).
 
 %% @doc Read one log including head and maybe body.
@@ -96,7 +97,7 @@ current_position(#rcur{position = Position}) -> Position.
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Read log meta data.
--spec read_meta(cursor()) -> cursor().
+-spec read_meta(cursor()) -> cursor() | eof.
 read_meta(#rcur{ version  = Version
                , fd       = Fd
                , ptr_at   = meta
@@ -134,7 +135,7 @@ read_header(#rcur{ fd       = Fd
 %% the fd is positioned to the beginning of the next log
 %% @end
 -spec maybe_read_body(cursor(), options()) ->
-        {cursor(), ?undef | body()} | no_return().
+        {cursor(), ?undef | body()}.
 maybe_read_body(#rcur{ fd       = Fd
                      , ptr_at   = body
                      , meta     = Meta
@@ -159,7 +160,7 @@ maybe_read_body(#rcur{ fd       = Fd
 %% @private Read the first byte version number, position fd to location 1
 %% Return 'empty' in case the file is empty or contains only a version byte
 %% @end
--spec read_version(file:fd()) -> empty | logvsn() | no_return().
+-spec read_version(file:fd()) -> empty | logvsn().
 read_version(Fd) ->
   case file:read(Fd, 1) of
     eof                                         -> empty;
