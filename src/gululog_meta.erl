@@ -24,11 +24,11 @@
 
 -include("gululog_priv.hrl").
 
--record(meta, { logid       :: logid()
-              , header_size :: bytecnt()
-              , body_size   :: bytecnt()
-              , header_crc  :: pos_integer()
-              , body_crc    :: pos_integer()
+-record(meta, { logid       = 0 :: logid()
+              , header_size = 0 :: bytecnt()
+              , body_size   = 0 :: bytecnt()
+              , header_crc  = 0 :: non_neg_integer()
+              , body_crc    = 0 :: non_neg_integer()
               }).
 
 -opaque meta() :: #meta{}.

@@ -129,8 +129,7 @@ maybe_close_w_cur(W_cur)  -> gululog_w_cur:flush_close(W_cur).
 
 dir_missing_test() ->
   ?assertException(error, {field_value_missing, state, dir}, #state{}),
-  ?assertException(error, {field_value_missing, state, segMB}, #state{dir = ""}),
-  ?assertMatch(#state{}, #state{dir = "", segMB = 100}).
+  ?assertException(error, {field_value_missing, state, segMB}, #state{dir = ""}).
 
 -endif.
 

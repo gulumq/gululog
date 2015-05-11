@@ -41,7 +41,7 @@ open(Dir, SegId) ->
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
   try read_version(Fd) of
     empty ->
-      file:close(Fd),
+      ok = file:close(Fd),
       empty;
     VSN when is_integer(VSN) andalso VSN =< ?LOGVSN ->
       #rcur{ version  = VSN
@@ -52,7 +52,7 @@ open(Dir, SegId) ->
            , position = 1
            }
   catch C : E ->
-    file:close(Fd),
+    ok = file:close(Fd),
     erlang:raise(C, E, erlang:get_stacktrace())
   end.
 
