@@ -35,7 +35,7 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Open segment file in 'raw' mode for a reader.
--spec open(dirname(), segid()) -> empty | cursor().
+-spec open(dirname(), segid()) -> empty | cursor() | no_return().
 open(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
   {ok, Fd} = file:open(FileName, [read, raw, binary]),
