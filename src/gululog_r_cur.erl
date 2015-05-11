@@ -61,6 +61,7 @@ open(Dir, SegId) ->
 close(#rcur{fd = Fd}) -> file:close(Fd).
 
 %% @doc Read one log including head and body.
+-spec read(cursor()) -> no_return().
 read(Cur) -> read(Cur, []).
 
 %% @doc Read one log including head and maybe body.
@@ -96,7 +97,7 @@ current_position(#rcur{position = Position}) -> Position.
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Read log meta data.
--spec read_meta(cursor()) -> cursor().
+-spec read_meta(cursor()) -> cursor() | eof.
 read_meta(#rcur{ version  = Version
                , fd       = Fd
                , ptr_at   = meta

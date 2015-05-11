@@ -36,7 +36,7 @@
 -include("gululog_priv.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
--opaque cache() :: ets:tid().
+-opaque cache() :: ets:tid() | atom().
 
 -record(idx, { version :: logvsn()
              , segid   :: segid()
@@ -245,7 +245,7 @@ delete_from_cache(Tid, LogId) ->
 %% Return new index(), the truncated segid, and a list of deleted segids
 %% @end
 -spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
-        {index(), ?undef | segid(), [segid()]}.
+        {#idx{} | index(), [file_op()]}.
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   false = is_out_of_range(Tid, LogId), %% assert
   %% Find all the Segids that are greater than the given segid -- to be deleted
@@ -369,7 +369,7 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
 wildcard_reversed(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
--spec open_writer_fd(IsNew :: boolean(), filename()) -> file:fd() | no_return().
+-spec open_writer_fd(IsNew :: boolean(), filename()) -> {logvsn(), file:fd()} | no_return().
 open_writer_fd(true, FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   ok = file:write(Fd, <<?LOGVSN:8>>),

@@ -129,7 +129,7 @@ truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
   end.
 
 %% @equiv delete_oldest_seg/2
--spec delete_oldest_seg(topic()) -> {topic(), [file_op()]}.
+-spec delete_oldest_seg(topic()) -> no_return().
 delete_oldest_seg(Topic) -> delete_oldest_seg(Topic, ?undef).
 
 %% @doc Delete oldest segment from topic.
@@ -140,7 +140,7 @@ delete_oldest_seg(Topic) -> delete_oldest_seg(Topic, ?undef).
 %%    --- This is considered purging the entrir topic, should be done using
 %%        truncation API instead
 %% @end
--spec delete_oldest_seg(topic(), dirname()) -> {topic(), [file_op()]}.
+-spec delete_oldest_seg(topic(), ?undef | dirname()) -> {topic(), [file_op()]}.
 delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, BackupDir) ->
   case gululog_idx:delete_oldest_seg(Dir, Idx, BackupDir) of
     {NewIdx, false} ->
