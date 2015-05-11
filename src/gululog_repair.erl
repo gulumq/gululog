@@ -24,11 +24,11 @@
 %% 2. truncate the corrupted .idx and .seg tails
 %%    (files are backed up before truncate if backup dir is given).
 %% @end
--spec repair_dir(dirname()) -> {ok, [{file_op()}]} | no_return().
+-spec repair_dir(dirname()) -> {ok, [{file_op()}]}.
 repair_dir(Dir) -> repair_dir(Dir, ?undef).
 
 -spec repair_dir(dirname(), ?undef | dirname()) ->
-        {ok, [{file_op()}]} | no_return().
+        {ok, [{file_op()}]}.
 repair_dir(Dir, BackupDir) ->
   case filelib:is_dir(Dir) of
     true ->
