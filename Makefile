@@ -17,7 +17,7 @@ clean:
 doc:
 	$(REBAR) doc
 
-xref:
+xref: deps compile
 	$(REBAR) xref
 
 ct: REBAR := TEST=1 $(REBAR)
