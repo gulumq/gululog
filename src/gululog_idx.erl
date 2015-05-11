@@ -245,7 +245,7 @@ delete_from_cache(Tid, LogId) ->
 %% Return new index(), the truncated segid, and a list of deleted segids
 %% @end
 -spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
-        {#idx{} | index(), [file_op()]}.
+        {index(), [file_op()]}.
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   false = is_out_of_range(Tid, LogId), %% assert
   %% Find all the Segids that are greater than the given segid -- to be deleted
