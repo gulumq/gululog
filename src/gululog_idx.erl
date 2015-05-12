@@ -46,18 +46,18 @@
 
 -opaque index() :: #idx{}.
 
--define(ETS_ENTRY(SEGID_, LOGID_, POSITION_),
-        {LOGID_, {SEGID_, POSITION_}}).
--define(TO_FILE_ENTRY(SEGID_, LOGID_, POSITION_),
-        <<(LOGID_ - SEGID_):32, POSITION_:32>>).
--define(FROM_FILE_ENTRY_V1(SEGID_, FILE_ENTRY_BIG_INTEGER_),
-        begin
-          <<OFFSET_:32, POSITION_:32>> = <<FILE_ENTRY_BIG_INTEGER_:64>>,
-          ?ETS_ENTRY(SEGID_, SEGID_ + OFFSET_, POSITION_)
-        end).
--define(FILE_ENTRY_BYTES_V1, 8). %% Number of bytes in file per index entry.
--define(FILE_ENTRY_BITS_V1, 64). %% Number of bits in file per index entry.
--define(FILE_READ_CHUNK, (1 bsl 20)). %% Number of index entries per file read.
+
+
+-define(ETS_ENTRY(LogId, Ts, SegId, Position),
+                 {LogId, Ts, SegId, Position}).
+
+-define(FILE_ENTRY(LogId, Ts, SegId, Position),
+        <<(LogId - SegId):32, Ts:32, Position:32>>).
+
+-define(FILE_ENTRY_BYTES_V1, 12). %% Number of bytes in file per index entry.
+-define(FILE_ENTRY_BITS_V1,  96). %% Number of bits  in file per index entry.
+
+-define(FILE_READ_CHUNK, (1 bsl 10)). %% Number of index entries per file read.
 
 %%%*_ API FUNCTIONS ============================================================
 
@@ -110,8 +110,9 @@ append(#idx{ version = ?LOGVSN
            , fd      = Fd
            , tid     = Tid
            } = Idx, LogId, Position) ->
-  ok = file:write(Fd, ?TO_FILE_ENTRY(SegId, LogId, Position)),
-  ets:insert(Tid, ?ETS_ENTRY(SegId, LogId, Position)),
+  Ts   = gululog_dt:os_sec(),
+  ok   = file:write(Fd, ?FILE_ENTRY(LogId, Ts, SegId, Position)),
+  true = ets:insert(Tid, ?ETS_ENTRY(LogId, Ts, SegId, Position)),
   Idx.
 
 %% @doc Delete oldest segment from index.
@@ -128,7 +129,7 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index, BackupDir)
   case get_oldest_segid(Index) of
     SegIdToDelete when is_integer(SegIdToDelete) andalso
                        SegIdToDelete < CurrentSegId ->
-      Ms = ets:fun2ms(fun(?ETS_ENTRY(SegId, _, _)) -> SegId =:= SegIdToDelete end),
+      Ms = ets:fun2ms(fun(?ETS_ENTRY(_, _, SegId, _)) -> SegId =:= SegIdToDelete end),
       _ = ets:select_delete(Tid, Ms),
       FileOp = gululog_file:delete(mk_name(Dir, SegIdToDelete), BackupDir),
       {Index, {SegIdToDelete, FileOp}};
@@ -165,8 +166,7 @@ locate(Dir, Tid, LogId) ->
         true ->
           false;
         false ->
-          PrevLogId = ets:prev(Tid, LogId),
-          [?ETS_ENTRY(SegId, _, _)] = ets:lookup(Tid, PrevLogId),
+          SegId = prev_log_segid(Tid, LogId),
           scan_locate(Dir, SegId, LogId)
       end;
     Location ->
@@ -180,8 +180,8 @@ locate(Dir, Tid, LogId) ->
         {segid(), position()} | false.
 locate_in_cache(Tid, LogId) ->
   case ets:lookup(Tid, LogId) of
-    []                                   -> false;
-    [?ETS_ENTRY(SegId, LogId, Position)] -> {SegId, Position}
+    []                                        -> false;
+    [?ETS_ENTRY(LogId, _Ts, SegId, Position)] -> {SegId, Position}
   end.
 
 %% @doc Get latest logid from index.
@@ -233,9 +233,9 @@ delete_from_cache(Tid, LogId) ->
       case ets:lookup(Tid, LogId) of
         [] ->
           false; %% either out of range, or already deleted
-        [?ETS_ENTRY(SegId, SegId, _Pos)] ->
-          false; %% refuse to delete
-        [?ETS_ENTRY(_SegId, LogId, _Pos)] ->
+        [?ETS_ENTRY( SegId, _Ts, SegId, _Pos)] ->
+          false; %% refuse to delete the first entry in one seg
+        [?ETS_ENTRY(LogId, _Ts, _SegId, _Pos)] ->
           ets:delete(Tid, LogId)
       end
   end,
@@ -249,7 +249,7 @@ delete_from_cache(Tid, LogId) ->
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   false = is_out_of_range(Tid, LogId), %% assert
   %% Find all the Segids that are greater than the given segid -- to be deleted
-  Ms = ets:fun2ms(fun(?ETS_ENTRY(I, I, _)) when I > SegId -> I end),
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(I, _Ts, I, _)) when I > SegId -> I end),
   DeleteSegIdList0 = ets:select(Tid, Ms),
   %% In case truncating from the very beginning, delete instead
   {SegIdToTruncate, DeleteSegIdList} =
@@ -271,8 +271,8 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
         ok = close_cache(Tid),
         init(Dir);
       false ->
-        NewTid = truncate_cache(Tid, LogId),
-        {NewSegId, _} = locate_in_cache(Tid, LogId - 1),
+        NewSegId = prev_log_segid(Tid, LogId),
+        NewTid   = truncate_cache(Tid, LogId),
         FileName = mk_name(Dir, NewSegId),
         {Version, NewFd} = open_writer_fd(false, FileName),
         Idx#idx{ version = Version
@@ -288,7 +288,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
 %% @private Truncate cache, from the given logid (inclusive).
 -spec truncate_cache(cache(), logid()) -> cache().
 truncate_cache(Tid, LogId) ->
-  Ms = ets:fun2ms(fun(?ETS_ENTRY(_, LogIdX, _)) -> LogIdX >= LogId end),
+  Ms = ets:fun2ms(fun(?ETS_ENTRY(LogIdX, _, _, _)) -> LogIdX >= LogId end),
   _ = ets:select_delete(Tid, Ms),
   Tid.
 
@@ -304,19 +304,18 @@ scan_locate(Dir, SegId, LogId) ->
   Fd = open_reader_fd(FileName),
   try
     {ok, <<Version:8>>} = file:read(Fd, 1),
-    scan_locate_per_vsn(Fd, SegId, LogId, Version)
+    scan_locate_per_vsn(Version, Fd, SegId, LogId)
   after
     file:close(Fd)
   end.
 
--spec scan_locate_per_vsn(file:fd(), segid(), logid(), logvsn()) ->
+-spec scan_locate_per_vsn(logvsn(), file:fd(), segid(), logid()) ->
         {segid(), position()}.
-scan_locate_per_vsn(Fd, SegId, LogId, 1) ->
+scan_locate_per_vsn(1, Fd, SegId, LogId) ->
   %% The offset caculate by per-entry size + one byte version
   Location = (LogId - SegId) * ?FILE_ENTRY_BYTES_V1 + 1,
-  {ok, <<FileEntry:?FILE_ENTRY_BITS_V1>>} =
-    file:pread(Fd, Location, ?FILE_ENTRY_BYTES_V1),
-  ?ETS_ENTRY(SegId, LogId, Position) = ?FROM_FILE_ENTRY_V1(SegId, FileEntry),
+  {ok, FileEntry} = file:pread(Fd, Location, ?FILE_ENTRY_BYTES_V1),
+  ?ETS_ENTRY(LogId, _Ts, SegId, Position) = from_file_entry(1, SegId, FileEntry),
   {SegId, Position}.
 
 %% @private Check if the given log ID is out of indexing range.
@@ -357,8 +356,8 @@ init_ets_from_index_file(_Version = 1, Tid, SegId, Fd) ->
     eof ->
       ok;
     {ok, ChunkBin} ->
-      [ ets:insert(Tid, ?FROM_FILE_ENTRY_V1(SegId, Entry))
-        || <<Entry:?FILE_ENTRY_BITS_V1>> <= ChunkBin ],
+      [ ets:insert(Tid, from_file_entry(1, SegId, <<E:?FILE_ENTRY_BITS_V1>>))
+        || <<E:?FILE_ENTRY_BITS_V1>> <= ChunkBin ],
       init_ets_from_index_file(1, Tid, SegId, Fd)
   end.
 
@@ -404,7 +403,7 @@ get_oldest_segid(#idx{tid = Tid}) ->
     '$end_of_table' ->
       false;
     LogId ->
-      [{LogId, {SegId, _}}] = ets:lookup(Tid, LogId),
+      [?ETS_ENTRY(LogId, _Ts, SegId, _Pos)] = ets:lookup(Tid, LogId),
       LogId = SegId %% assert
   end.
 
@@ -432,6 +431,21 @@ truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = mk_name(Dir, SegId),
   IdxPosition = get_position_in_index_file(IdxFile, LogId),
   [_ | _] = gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir). %% assert
+
+%% @private Convert file binary entry to ets entry.
+-spec from_file_entry(logvsn(), segid(), binary()) -> ok.
+from_file_entry(1, SegId, <<Offset:32, Ts:32, Position:32>>) ->
+  ?ETS_ENTRY(SegId + Offset, Ts, SegId, Position).
+
+%% @private Get segid of previous log.
+-spec prev_log_segid(cache(), logid()) -> segid().
+prev_log_segid(Tid, LogId) ->
+  PrevLogId = ets:prev(Tid, LogId),
+  %% since we never allow deleting the first entry in a segment
+  %% the next match can never fail
+  true = is_integer(PrevLogId),
+  [?ETS_ENTRY(_, _, SegId, _)] = ets:lookup(Tid, PrevLogId),
+  SegId.
 
 %%%*_ TESTS ====================================================================
 
@@ -476,18 +490,19 @@ gululog_idx_test_() ->
           BackupDir       = filename:join(Dir, "backup"),
           BackupDirDelete = filename:join(Dir, "backup_delete"),
           Idx0 = init(Dir),
-          Expect1 = [{0, {0, 1}},
-                     {1, {0, 10}},
-                     {2, {0, 20}},
-                     {3, {0, 30}},
-                     {4, {0, 40}},
-                     {5, {5, 1}},
-                     {6, {5, 60}},
-                     {7, {7, 1}},
-                     {8, {7, 80}},
-                     {9, {7, 90}},
-                     {10, {7, 100}}],
-          ?assertEqual(Expect1, ets:tab2list(Idx0#idx.tid)),
+          ?assertMatch(
+            [ ?ETS_ENTRY(0,  _, 0, 1)
+            , ?ETS_ENTRY(1,  _, 0, 10)
+            , ?ETS_ENTRY(2,  _, 0, 20)
+            , ?ETS_ENTRY(3,  _, 0, 30)
+            , ?ETS_ENTRY(4,  _, 0, 40)
+            , ?ETS_ENTRY(5,  _, 5, 1)
+            , ?ETS_ENTRY(6,  _, 5, 60)
+            , ?ETS_ENTRY(7,  _, 7, 1)
+            , ?ETS_ENTRY(8,  _, 7, 80)
+            , ?ETS_ENTRY(9,  _, 7, 90)
+            , ?ETS_ENTRY(10, _, 7, 100)
+            ], ets:tab2list(Idx0#idx.tid)),
           ?assertException(error, {badmatch, true},
                            truncate(Dir, Idx0, 7, 11, ?undef)),
           Idx12 = Idx0, %% bing lazy to update the suffix number
@@ -526,11 +541,11 @@ gululog_idx_test_() ->
                         {?OP_TRUNCATED, mk_name(Dir, 0)}],
                        lists:sort(Truncated4)),
           ?assertEqual(0, Idx16#idx.segid),
-          Expect2 = [{0, {0, 1}},
-                     {1, {0, 10}},
-                     {2, {0, 20}}],
-          EtsTable2 = Idx16#idx.tid,
-          ?assertEqual(Expect2, ets:tab2list(EtsTable2)),
+          ?assertMatch(
+            [ ?ETS_ENTRY(0, _, 0, 1)
+            , ?ETS_ENTRY(1, _, 0, 10)
+            , ?ETS_ENTRY(2, _, 0, 20)
+            ], ets:tab2list(Idx16#idx.tid)),
           %% truncate to the very beginning
           LogId5 = 0,
           {SegId5, _} = locate(Dir, Idx16, LogId5),
