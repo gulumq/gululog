@@ -106,7 +106,7 @@ t_init_from_existing(Config) when is_list(Config) ->
             , {4, {4, 1}}
             ],
   Index = gululog_idx:switch(Dir, Index0, _NextLogId = 4),
-  Index = gululog_idx:append(Index, 4, 1),
+  Index = gululog_idx:append(Index, 4, 1, ts()),
   lists:foreach(fun({LogId, ExpectedLocation}) ->
                   Location = gululog_idx:locate(Dir, Index, LogId),
                   ?assertEqual(ExpectedLocation, Location)
@@ -143,14 +143,16 @@ t_scan_file_to_locate(Config) when is_list(Config) ->
 
 %%%_* Help functions ===========================================================
 
+ts() -> gululog_dt:os_sec().
+
 init_idx(Dir, Events) -> init_idx(Dir, gululog_idx:init(Dir), Events).
 
 init_idx(_Dir, Idx, []) -> Idx;
 init_idx(Dir, Idx, [{append, LogId, Pos} | Events]) ->
-  NewIdx = gululog_idx:append(Idx, LogId, Pos),
+  NewIdx = gululog_idx:append(Idx, LogId, Pos, ts()),
   init_idx(Dir, NewIdx, Events);
 init_idx(Dir, Idx, [{switch_append, LogId, Pos} | Events]) ->
-  NewIdx = gululog_idx:switch_append(Dir, Idx, LogId, Pos),
+  NewIdx = gululog_idx:switch_append(Dir, Idx, LogId, Pos, ts()),
   init_idx(Dir, NewIdx, Events).
 
 %%%_* Emacs ====================================================================

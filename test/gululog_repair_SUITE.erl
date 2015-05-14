@@ -156,8 +156,8 @@ t_truncate_index_ahead({init, Config}) ->
   ok = gululog_topic:close(Topic1),
   %% write ahead some index entries.
   Idx0 = gululog_idx:init(Dir),
-  Idx1 = gululog_idx:append(Idx0, 1, 100),
-  Idx2 = gululog_idx:append(Idx1, 2, 2000),
+  Idx1 = gululog_idx:append(Idx0, 1, 100, gululog_dt:os_sec()),
+  Idx2 = gululog_idx:append(Idx1, 2, 2000, gululog_dt:os_sec()),
   ok = gululog_idx:flush_close(Idx2),
   Config;
 t_truncate_index_ahead({'end', _Config}) -> ok;
@@ -231,7 +231,7 @@ t_empty_seg_file({init, Config}) ->
   ok = gululog_topic:close(Topic1),
   %% switch to new segment, append index entry
   Idx0 = gululog_idx:init(Dir),
-  Idx1 = gululog_idx:switch_append(Dir, Idx0, 1, 1),
+  Idx1 = gululog_idx:switch_append(Dir, Idx0, 1, 1, gululog_dt:os_sec()),
   ok = gululog_idx:flush_close(Idx1),
   %% make an empty segment file
   ok = file:write_file(gululog_name:mk_seg_name(Dir, 1), <<>>),

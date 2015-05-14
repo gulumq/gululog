@@ -9,6 +9,8 @@
         , truncate/3
         , delete_oldest_seg/1
         , delete_oldest_seg/2
+        , first_logid_since/2
+        , last_append_info/1
         ]).
 
 -export_type([topic/0]).
@@ -28,6 +30,7 @@
                , idx                      :: index()
                , cur                      :: cursor()
                , logid                    :: logid()
+               , appended                 :: ?undef | {logid(), os_sec()}
                }).
 
 -opaque topic() :: #topic{}.
@@ -85,13 +88,28 @@ append(#topic{ dir   = Dir
       NewIdx = gululog_idx:switch(Dir, Idx, LogId),
       append(Topic#topic{idx = NewIdx, cur = NewCur}, Header, Body);
     false ->
+      Ts     = gululog_dt:os_sec(),
       NewCur = gululog_w_cur:append(Cur, LogId, Header, Body),
-      NewIdx = gululog_idx:append(Idx, LogId, Position),
-      Topic#topic{ cur   = NewCur
-                 , idx   = NewIdx
-                 , logid = LogId + 1
+      NewIdx = gululog_idx:append(Idx, LogId, Position, Ts),
+      Topic#topic{ cur      = NewCur
+                 , idx      = NewIdx
+                 , logid    = LogId + 1
+                 , appended = {LogId, Ts}
                  }
   end.
+
+%% @doc Get last appended log infomation.
+%% This is the information in reply to the producers.
+%% @end
+-spec last_append_info(topic()) -> ?undef | {logid(), os_sec()}.
+last_append_info(#topic{appended = Appended}) -> Appended.
+
+%% @doc Find first logid which was appended at or after the given
+%% timestamp (server time). Return 'false' if no such log entry.
+%% @end
+-spec first_logid_since(topic(), os_sec()) -> false | logid().
+first_logid_since(#topic{dir = Dir, idx = Idx}, Ts) ->
+  gululog_idx:first_logid_since(Dir, Idx, Ts).
 
 %% @doc Close index and segment writer cursor.
 -spec close(topic()) -> ok.
