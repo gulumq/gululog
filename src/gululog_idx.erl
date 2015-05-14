@@ -14,12 +14,13 @@
         , delete_oldest_seg/3 %% Delete oldest segment from index, backup it first if necessary
         , delete_from_cache/2 %% Delete given log entry from index cache
         , truncate/5          %% Truncate cache and file from the given logid (inclusive)
-        , first_logid_since/3 %% First logid since the given timestamp (second inclusive)
         ]).
 
 %% APIs for readers (public access)
 -export([ locate/3            %% Locate {SegId, Position} for a given LogId
         , get_latest_logid/1  %% latest logid in ets
+        , get_latest_ts/1     %% latest log timestamp
+        , first_logid_since/3 %% First logid since the given timestamp (second inclusive)
         , init_cache/1
         , close_cache/1
         , locate_in_cache/2
@@ -133,25 +134,15 @@ switch_append(Dir, Idx, LogId, Position, Ts) ->
 %% return {segid(), position()} if the given LogId is found
 %% return 'false' if not in valid range
 %% @end
--spec locate(dirname(), index() | cache(), logid()) ->
-        {segid(), position()} | false.
-locate(Dir, #idx{tid = Tid}, LogId) ->
-  locate(Dir, Tid, LogId);
-locate(Dir, Tid, LogId) ->
-  case locate_in_cache(Tid, LogId) of
-    false ->
-      case is_out_of_range(Tid, LogId) of
-        true ->
-          false;
-        false ->
-          SegId = prev_entry_segid(Tid, LogId),
-          ?ENTRY(LogId, _Ts, SegId, Position) = %% assert not eof
-            read_file_entry(Dir, SegId, LogId),
-          {SegId, Position}
-      end;
-    Location ->
-      Location
-  end.
+-spec locate(dirname(), index() | cache(), logid()) -> false | location().
+locate(Dir, #idx{tid = Tid}, LogId) -> locate(Dir, Tid, LogId);
+locate(Dir, Tid, LogId)             -> to_location(read_entry(Dir, Tid, LogId)).
+
+%% @doc Locate {SegId, Position} for a given LogId
+%% return {segid(), position()} from cached records
+%% @end
+-spec locate_in_cache(cache(), logid()) -> false | location().
+locate_in_cache(Tid, LogId) -> to_location(lookup_cache(Tid, LogId)).
 
 %% @doc Delete oldest segment from index.
 %% Return the new index and the deleted file with OP tag
@@ -180,21 +171,7 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index, BackupDir)
 first_logid_since(Dir, #idx{tid = Tid}, Ts) ->
   first_logid_since(Dir, Tid, Ts);
 first_logid_since(Dir, Tid, Ts) ->
-  case is_empty_cache(tid) of
-    true  -> false;
-    false -> find_first_logid_since(Dir, Tid, Ts)
-  end.
-
-%% @doc Locate {SegId, Position} for a given LogId
-%% return {segid(), position()} from cached records
-%% @end
--spec locate_in_cache(cache(), logid()) ->
-        {segid(), position()} | false.
-locate_in_cache(Tid, LogId) ->
-  case lookup_cache(Tid, LogId) of
-    false                               -> false;
-    ?ENTRY(LogId, _Ts, SegId, Position) -> {SegId, Position}
-  end.
+  not is_empty_cache(Tid) andalso find_first_logid_since(Dir, Tid, Ts).
 
 %% @doc Get latest logid from index.
 %% return 'false' if it is an empty index.
@@ -206,6 +183,18 @@ get_latest_logid(Tid) ->
   case ets:last(Tid) of
     '$end_of_table' -> false;
     LogId           -> LogId
+  end.
+
+%% @doc Get timestamp of the latest index entry.
+%% Return false in case index is empty.
+%% @end
+-spec get_latest_ts(index() | cache()) -> os_sec() | false.
+get_latest_ts(#idx{tid = Tid}) ->
+  get_latest_ts(Tid);
+get_latest_ts(Tid) ->
+  case last_in_cache(Tid) of
+    false                            -> false;
+    ?ENTRY(_LogId, Ts, _SegId, _Pos) -> Ts
   end.
 
 %% @doc To find the byte offset for the given logid in the index file.
@@ -293,6 +282,19 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
+-spec to_location(false | entry()               ) -> false | location().
+to_location(                               false) -> false;
+to_location(?ENTRY(_LogId, _Ts, SegId, Position)) -> {SegId, Position}.
+
+%% @private Read entry from cache, read from file if deleted from cache.
+-spec read_entry(dirname(), cache(), logid()) -> false | entry().
+read_entry(Dir, Tid, LogId) ->
+  not is_out_of_range(Tid, LogId) andalso
+  case lookup_cache(Tid, LogId) of
+    false -> read_file_entry(Dir, prev_entry_segid(Tid, LogId), LogId);
+    Entry -> Entry
+  end.
+
 %% @private Truncate cache, from the given logid (inclusive).
 %% re-initialize the cache for last segment in case there are entries deleted.
 %% @end
@@ -322,7 +324,7 @@ latest_cached_entry_before_ts(Tid, Ts, Lo, Hi, LogId) ->
 %% @private Position read the index file to locate the log position in segment file.
 %% This function is called only when ets cache is not hit
 %% @end
--spec read_file_entry(dirname(), segid(), logid()) -> eof | entry().
+-spec read_file_entry(dirname(), segid(), logid()) -> entry().
 read_file_entry(Dir, SegId, LogId) ->
   true = (LogId > SegId), %% assert
   Fd = open_reader_fd(Dir, SegId),
@@ -334,15 +336,15 @@ read_file_entry(Dir, SegId, LogId) ->
   end.
 
 %% @private Read file entry per version.
--spec read_file_entry(logvsn(), file:fd(), segid(), logid()) -> eof | entry().
+%% Assuming this function is always called with valid logid
+%% @end
+-spec read_file_entry(logvsn(), file:fd(), segid(), logid()) -> entry().
 read_file_entry(Version, Fd, SegId, LogId) ->
   %% in-file-offset = (logid-offset * entry-size) + one byte version
   Bytes = file_entry_bytes(Version),
   Location = (LogId - SegId) * Bytes + 1,
-  case file:pread(Fd, Location, Bytes) of
-    eof             -> eof;
-    {ok, FileEntry} -> from_file_entry(1, SegId, FileEntry)
-  end.
+  {ok, FileEntry} = file:pread(Fd, Location, Bytes),
+  from_file_entry(1, SegId, FileEntry).
 
 %% @private Find the first logid since the given timestamp (inclusive).
 %% Assuming the cache ets table is not empty.
@@ -387,13 +389,12 @@ find_first_logid_since_in_file(Dir, Ts, SegId, LogIdLo, LogIdHi) ->
   end.
 
 %% @private Read .idx file entries to locate the first logid since the given timestamp.
--spec find_first_logid_since_in_file(fun((logid()) -> eof | entry()),
+-spec find_first_logid_since_in_file(fun((logid()) -> entry()),
                                      logid(), logid(), os_sec()) -> logid().
 find_first_logid_since_in_file(_ReadFun, LogId, LogId, _Ts) ->
   LogId;
 find_first_logid_since_in_file(ReadFun, LogIdLo, LogIdHi, Ts) ->
   case ReadFun((LogIdLo + LogIdHi) bsr 1) of
-    eof -> LogIdHi;
     ?ENTRY(LogIdMi, TsX, _SegId, _Pos) when TsX >= Ts ->
       find_first_logid_since_in_file(ReadFun, LogIdLo, LogIdMi, Ts);
     ?ENTRY(LogIdMi, TsX, _SegId, _Pos) when TsX < Ts ->
@@ -483,13 +484,12 @@ open_reader_fd(FileName) ->
 mk_name(Dir, SegId) -> gululog_name:mk_idx_name(Dir, SegId).
 
 %% @private Get oldest segid from index
--spec get_oldest_segid(index()) -> logid() | false.
+-spec get_oldest_segid(index()) -> false | logid().
 get_oldest_segid(#idx{tid = Tid}) ->
-  case ets:first(Tid) of
-    '$end_of_table' ->
+  case first_in_cache(Tid) of
+    false ->
       false;
-    LogId ->
-      ?ENTRY(LogId, _Ts, SegId, _Pos) = lookup_cache(Tid, LogId),
+    ?ENTRY(LogId, _Ts, SegId, _Pos) ->
       LogId = SegId %% assert
   end.
 
@@ -593,9 +593,44 @@ is_empty_cache(Tid) -> '$end_of_table' =:= ets:first(Tid).
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+cache_help_fun_test() ->
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "gululog_idx-cache_help_fun_test"),
+  #idx{tid = Tid} = Idx0 = init(Dir),
+  ?assertEqual(false, first_in_cache(Tid)),
+  ?assertEqual(false, last_in_cache(Tid)),
+  ?assertEqual(false, prev_in_cache(Tid, 0)),
+  ?assertEqual(false, next_in_cache(Tid, 0)),
+  #idx{tid = Tid} = append(Idx0, 0, 1, gululog_dt:os_sec()),
+  ?assertEqual(first_in_cache(Tid), last_in_cache(Tid)),
+  ?assertEqual(false, prev_in_cache(Tid, 0)),
+  ?assertEqual(false, next_in_cache(Tid, 0)),
+  ok.
+
+basic_find_logid_by_ts_test() ->
+  {ok, Cwd} = file:get_cwd(),
+  Dir = filename:join(Cwd, "gululog_idx-basic_find_logid_by_ts_test"),
+  Idx0 = init(Dir),
+  ?assertEqual(false, first_logid_since(Dir, Idx0, gululog_dt:os_sec())),
+  Ts = gululog_dt:os_sec(),
+  VerifyFun = fun(Idx) ->
+                ?assertEqual(0, first_logid_since(Dir, Idx, Ts-1)),
+                ?assertEqual(0, first_logid_since(Dir, Idx, Ts)),
+                ?assertEqual(false, first_logid_since(Dir, Idx, Ts+1))
+              end,
+  Idx1 = append(Idx0, 0, 1, Ts),
+  VerifyFun(Idx1),
+  Idx2 = append(Idx1, 1, 2, Ts),
+  VerifyFun(Idx2),
+  Idx3 = append(Idx1, 2, 3, Ts),
+  VerifyFun(Idx3),
+  Idx4 = delete_from_cache(Idx3, 1),
+  VerifyFun(Idx4),
+  ok.
+
 test_dir() ->
   {ok, Dir} = file:get_cwd(),
-  filename:join(Dir, "gululog_idx-ut").
+  filename:join(Dir, "gululog_idx-gululog_idx_test_").
 
 gululog_idx_test_() ->
   { foreach
@@ -616,9 +651,11 @@ gululog_idx_test_() ->
         ],
       Idx = lists:foldl(
               fun({append, LogId, Position}, IdxIn) ->
-                    append(IdxIn, LogId, Position, gululog_dt:os_sec());
+                    %% Ts = Logid for deterministic
+                    append(IdxIn, LogId, Position, _Ts = LogId);
                  ({switch_append, LogId, Position}, IdxIn) ->
-                    switch_append(Dir, IdxIn, LogId, Position, gululog_dt:os_sec())
+                    %% Ts = Logid for deterministic
+                    switch_append(Dir, IdxIn, LogId, Position, _Ts = LogId)
               end, init(Dir), DataList),
       ok = flush_close(Idx)
     end
@@ -727,6 +764,31 @@ gululog_idx_test_() ->
           FilesDeleted = lists:sort(lists:map(fun({?OP_DELETED, Fn}) -> Fn end, Truncated)),
           ?assertEqual(Files, FilesDeleted),
           ?assertEqual(0, Idx1#idx.segid)
+        end
+      }
+    , { "delete + find logid by ts"
+      , fun() ->
+          Dir = test_dir(),
+          Idx0 = init(Dir),
+          TsVerifyFun =
+            fun(Idx) ->
+              lists:foreach(fun(_Ts = LogId) ->
+                              %% LogId as Ts for deterministic
+                              ?assertEqual(LogId, first_logid_since(Dir, Idx, LogId))
+                            end, lists:seq(0,10))
+            end,
+          ok = TsVerifyFun(Idx0),
+          %% delete the last entry in segmeng 0 from cache
+          Idx1 = delete_from_cache(Idx0, 4),
+          ok = TsVerifyFun(Idx1),
+          %% delete the second last entry in segment 0 from cache
+          Idx2 = delete_from_cache(Idx1, 3),
+          ok = TsVerifyFun(Idx2),
+          %% delete all possible entries
+          Idx3 = lists:foldl(fun(LogId, IdxIn) ->
+                               delete_from_cache(IdxIn, LogId)
+                             end, Idx2, lists:seq(0,10)),
+          ok = TsVerifyFun(Idx3)
         end
       }
     ]

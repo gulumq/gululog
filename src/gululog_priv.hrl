@@ -17,6 +17,7 @@
 -type bytecnt()  :: non_neg_integer().
 -type header()   :: binary().
 -type body()     :: binary().
+-type location() :: {segid(), position()}.
 
 -define(LOGVSN, 1). %% Current version
 -define(DOT_IDX, ".idx").

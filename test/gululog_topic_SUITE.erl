@@ -49,12 +49,18 @@ t_basic_flow(Config) when is_list(Config) ->
   Dir = ?config(dir),
   T0 = gululog_topic:init(Dir, [{segMB, 1}]),
   Body = fun(C) -> list_to_binary(lists:duplicate(500000, C)) end,
+  Ts = gululog_dt:os_sec(),
   T1 = gululog_topic:append(T0, <<"header0">>, Body($0)),
+  ?assertMatch({0, _}, gululog_topic:get_last_logid_ts(T1)),
   T2 = gululog_topic:append(T1, <<"header1">>, Body($1)),
+  ?assertMatch({1, _}, gululog_topic:get_last_logid_ts(T2)),
   T3 = gululog_topic:append(T2, <<"header2">>, Body($2)),
+  ?assertMatch({2, _}, gululog_topic:get_last_logid_ts(T3)),
   ok = gululog_topic:close(T3),
   T4 = gululog_topic:init(Dir, [{segMB, 1}]),
   T5 = gululog_topic:append(T4, <<"header3">>, Body($3)),
+  ?assertMatch({3, _}, gululog_topic:get_last_logid_ts(T5)),
+  ?assertEqual(0, gululog_topic:first_logid_since(T5, Ts)),
   ok = gululog_topic:close(T5),
   Files = [ idx_name(Dir, 0)
           , idx_name(Dir, 2)
