@@ -10,7 +10,8 @@
         , delete_oldest_seg/1
         , delete_oldest_seg/2
         , first_logid_since/2
-        , get_last_logid_ts/1
+        , get_oldest_seg_age_sec/1
+        , get_latest_logid_and_ts/1
         ]).
 
 -export_type([topic/0]).
@@ -100,11 +101,21 @@ append(#topic{ dir        = Dir
 %% @doc Get last appended log infomation.
 %% This is the information in reply to the producers.
 %% @end
--spec get_last_logid_ts(topic()) -> false | {logid(), os_sec()}.
-get_last_logid_ts(#topic{ last_logid = LogId
-                        , last_ts    = Ts
-                        }) ->
+-spec get_latest_logid_and_ts(topic()) -> false | {logid(), os_sec()}.
+get_latest_logid_and_ts(#topic{ last_logid = LogId
+                              , last_ts    = Ts
+                              }) ->
   LogId =/= false andalso {LogId, Ts}.
+
+%% @doc Get the age (in seconds) of the oldest segment.
+%% The age of a segment = the age of the latest log entrie in the segment.
+%% @end
+-spec get_oldest_seg_age_sec(topic()) -> false | os_sec().
+get_oldest_seg_age_sec(#topic{dir = Dir, idx = Idx}) ->
+  case gululog_idx:get_oldest_segid(Idx) of
+    false -> false;
+    SegId -> gululog_dt:os_sec() - gululog_idx:get_seg_latest_ts(Dir, Idx, SegId)
+  end.
 
 %% @doc Find first logid which was appended at or after the given
 %% timestamp (server time). Return 'false' if no such log entry.
@@ -204,7 +215,7 @@ keyget(Key, KvList, Default) ->
 -include_lib("eunit/include/eunit.hrl").
 
 next_ts_test() ->
-  meck:new(gululog_dt, [passthrough]),
+  meck:new(gululog_dt, [passthrough, no_passthrough_cover]),
   Arg = [false, 4, 5, 5, 5, 5, 5], %% next_ts/1 arguments
   Seq = [4,     5, 4, 3, 3, 2, 6], %% gululog_dt:os_sec return values
   Exp = [4,     5, 5, 5, 5, 5, 6], %% expected result of next_ts/1

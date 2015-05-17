@@ -3,7 +3,7 @@
 -define(GULULOG_HRL, true).
 
 -type gululog_logid()     :: 0..18446744073709551615. %% 2 ^ 64 - 1
--type gululog_timestamp() :: pos_integer(). %% unix epoch seconds
+-type gululog_timestamp() :: non_neg_integer(). %% unix epoch seconds
 -type gululog_header()    :: binary().
 -type gululog_body()      :: binary().
 
