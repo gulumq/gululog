@@ -16,7 +16,8 @@
 %% cases
 -export([ t_basic_flow/1
         , t_init_from_existing/1
-        , t_scan_file_to_locate/1
+        , t_read_file_entry_to_locate/1
+        , t_truncated_latest_logid/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -114,8 +115,8 @@ t_init_from_existing(Config) when is_list(Config) ->
   ?assertEqual(4, gululog_idx:get_latest_logid(Index)),
   ok.
 
-%% @doc Delete log entry from index cache, scan idx file to locate.
-t_scan_file_to_locate({init, Config}) ->
+%% @doc Delete log entry from index cache, read idx file to locate.
+t_read_file_entry_to_locate({init, Config}) ->
   Dir = ?config(dir),
   Events = [ {append, 0, 1}
            , {append, 1, 10}
@@ -125,8 +126,8 @@ t_scan_file_to_locate({init, Config}) ->
   Idx = init_idx(Dir, Events),
   ok = gululog_idx:flush_close(Idx),
   Config;
-t_scan_file_to_locate({'end', _Config}) -> ok;
-t_scan_file_to_locate(Config) when is_list(Config) ->
+t_read_file_entry_to_locate({'end', _Config}) -> ok;
+t_read_file_entry_to_locate(Config) when is_list(Config) ->
   Dir = ?config(dir),
   Idx0 = gululog_idx:init(Dir),
   ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
@@ -139,6 +140,28 @@ t_scan_file_to_locate(Config) when is_list(Config) ->
   Idx2 = gululog_idx:delete_from_cache(Idx1, 3),
   ?assertEqual({0, 32}, gululog_idx:locate(Dir, Idx2, 3)),
   ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
+  ok.
+
+%% @doc Delete log entry from index cache, truncate after the deleted logid
+%% verify the truncated latest is correct
+%% @end
+t_truncated_latest_logid({init, Config}) ->
+  Dir = ?config(dir),
+  Events = [ {append, 0, 1}
+           , {append, 1, 10}
+           , {append, 2, 20}
+           ],
+  Idx = init_idx(Dir, Events),
+  ok = gululog_idx:flush_close(Idx),
+  Config;
+t_truncated_latest_logid({'end', _Config}) -> ok;
+t_truncated_latest_logid(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  Idx0 = gululog_idx:init(Dir),
+  ?assertEqual(2, gululog_idx:get_latest_logid(Idx0)),
+  Idx1 = gululog_idx:delete_from_cache(Idx0, 1),
+  {Idx, _} = gululog_idx:truncate(Dir, Idx0, 0, 2, ?undef),
+  ?assertEqual(1, gululog_idx:get_latest_logid(Idx)),
   ok.
 
 %%%_* Help functions ===========================================================
