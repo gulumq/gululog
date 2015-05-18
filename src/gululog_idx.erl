@@ -295,13 +295,13 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   FileOpList2 = truncate_truncate_do(Dir, SegIdToTruncate, LogId, BackupDir),
   NewIdx =
     %% check if the given logid is the first one
-    case LogId =:= ets:first(Tid) of
-      true ->
+    case prev_logid(Tid, LogId) of
+      false ->
         [] = wildcard_reversed(Dir), %% assert
         ok = close_cache(Tid),
         init(Dir);
-      false ->
-        NewSegId = get_segid(Tid, prev_logid(Tid, LogId)),
+      PrevLogId ->
+        NewSegId = get_segid(Tid, PrevLogId),
         NewTid   = truncate_cache(Tid, mk_name(Dir, NewSegId), LogId),
         FileName = mk_name(Dir, NewSegId),
         {Version, NewFd} = open_writer_fd(false, FileName),
@@ -476,9 +476,10 @@ find_latest_logid_in_seg(Tid, SegId, SegIdX, LogId) ->
   end.
 
 %% @private Get segid for the given logid.
-get_segid(Idx, LogId) ->
-  case lookup_cache(Idx, LogId) of
-    false                  -> get_segid(Idx, prev_logid(Idx, LogId));
+-spec get_segid(cache(), logid()) -> false | segid().
+get_segid(Tid, LogId) ->
+  case lookup_cache(Tid, LogId) of
+    false                  -> get_segid(Tid, prev_logid(Tid, LogId));
     ?ENTRY(_, _, SegId, _) -> SegId
   end.
 
