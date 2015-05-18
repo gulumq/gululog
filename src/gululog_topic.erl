@@ -9,6 +9,9 @@
         , truncate/3
         , delete_oldest_seg/1
         , delete_oldest_seg/2
+        , first_logid_since/2
+        , get_oldest_seg_age_sec/1
+        , get_latest_logid_and_ts/1
         ]).
 
 -export_type([topic/0]).
@@ -27,7 +30,8 @@
                , segMB = ?INIT_ERR(segMB) :: bytecnt()
                , idx                      :: index()
                , cur                      :: cursor()
-               , logid                    :: logid()
+               , last_logid               :: false | logid()
+               , last_ts                  :: false | os_sec()
                }).
 
 -opaque topic() :: #topic{}.
@@ -53,16 +57,13 @@ init(Dir, Options) ->
   SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
   Cur = gululog_w_cur:open(Dir),
   Idx = gululog_idx:init(Dir),
-  NextLogId = case gululog_idx:get_latest_logid(Idx) of
-                false -> 0;
-                N     -> N + 1
-              end,
   maybe_switch_to_new_version(
-    #topic{ dir   = Dir
-          , idx   = Idx
-          , cur   = Cur
-          , segMB = SegMB
-          , logid = NextLogId
+    #topic{ dir        = Dir
+          , idx        = Idx
+          , cur        = Cur
+          , segMB      = SegMB
+          , last_logid = gululog_idx:get_latest_logid(Idx)
+          , last_ts    = gululog_idx:get_latest_ts(Idx)
           }).
 
 %% @doc Append a new log entry to the given topic.
@@ -70,12 +71,14 @@ init(Dir, Options) ->
 %% hit the size limit.
 %% @end
 -spec append(topic(), header(), body()) -> topic().
-append(#topic{ dir   = Dir
-             , idx   = Idx
-             , cur   = Cur
-             , segMB = SegMB
-             , logid = LogId
+append(#topic{ dir        = Dir
+             , idx        = Idx
+             , cur        = Cur
+             , segMB      = SegMB
+             , last_logid = LastLogId
+             , last_ts    = LastTs
              } = Topic, Header, Body) ->
+  LogId = next_logid(LastLogId),
   Position = gululog_w_cur:next_log_position(Cur),
   %% NB! Swith before (but NOT after) appending.
   %% this is to minimize the chance of requiring a repair at restart.
@@ -85,13 +88,41 @@ append(#topic{ dir   = Dir
       NewIdx = gululog_idx:switch(Dir, Idx, LogId),
       append(Topic#topic{idx = NewIdx, cur = NewCur}, Header, Body);
     false ->
+      Ts     = next_ts(LastTs),
       NewCur = gululog_w_cur:append(Cur, LogId, Header, Body),
-      NewIdx = gululog_idx:append(Idx, LogId, Position),
-      Topic#topic{ cur   = NewCur
-                 , idx   = NewIdx
-                 , logid = LogId + 1
+      NewIdx = gululog_idx:append(Idx, LogId, Position, Ts),
+      Topic#topic{ cur        = NewCur
+                 , idx        = NewIdx
+                 , last_logid = LogId
+                 , last_ts    = Ts
                  }
   end.
+
+%% @doc Get last appended log infomation.
+%% This is the information in reply to the producers.
+%% @end
+-spec get_latest_logid_and_ts(topic()) -> false | {logid(), os_sec()}.
+get_latest_logid_and_ts(#topic{ last_logid = LogId
+                              , last_ts    = Ts
+                              }) ->
+  LogId =/= false andalso {LogId, Ts}.
+
+%% @doc Get the age (in seconds) of the oldest segment.
+%% The age of a segment = the age of the latest log entrie in the segment.
+%% @end
+-spec get_oldest_seg_age_sec(topic()) -> false | os_sec().
+get_oldest_seg_age_sec(#topic{dir = Dir, idx = Idx}) ->
+  case gululog_idx:get_oldest_segid(Idx) of
+    false -> false;
+    SegId -> gululog_dt:os_sec() - gululog_idx:get_seg_latest_ts(Dir, Idx, SegId)
+  end.
+
+%% @doc Find first logid which was appended at or after the given
+%% timestamp (server time). Return 'false' if no such log entry.
+%% @end
+-spec first_logid_since(topic(), os_sec()) -> false | logid().
+first_logid_since(#topic{dir = Dir, idx = Idx}, Ts) ->
+  gululog_idx:first_logid_since(Dir, Idx, Ts).
 
 %% @doc Close index and segment writer cursor.
 -spec close(topic()) -> ok.
@@ -101,11 +132,12 @@ close(#topic{idx = Idx, cur = Cur}) ->
 
 %% @doc Force switching to a new segment.
 -spec force_switch(topic()) -> topic().
-force_switch(#topic{ dir   = Dir
-                   , idx   = Idx
-                   , cur   = Cur
-                   , logid = LogId
+force_switch(#topic{ dir        = Dir
+                   , idx        = Idx
+                   , cur        = Cur
+                   , last_logid = LastLogId
                    } = Topic) ->
+  LogId  = next_logid(LastLogId),
   NewCur = gululog_w_cur:switch(Dir, Cur, LogId),
   NewIdx = gululog_idx:switch(Dir, Idx, LogId),
   Topic#topic{ idx = NewIdx
@@ -153,6 +185,19 @@ delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, BackupDir) ->
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
+%% @private Keep logid sequential.
+next_logid(false) -> 0;
+next_logid(LogId) -> LogId + 1.
+
+%% @private Keep timestamp monotonic.
+next_ts(false) ->
+  gululog_dt:os_sec();
+next_ts(Ts) ->
+  case gululog_dt:os_sec() of
+    NewTs when NewTs >= Ts -> NewTs;
+    _                      -> Ts
+  end.
+
 %% @private Nothing to do so far.
 maybe_switch_to_new_version(Topic) -> Topic.
 
@@ -168,6 +213,19 @@ keyget(Key, KvList, Default) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+next_ts_test() ->
+  meck:new(gululog_dt, [passthrough, no_passthrough_cover]),
+  Arg = [false, 4, 5, 5, 5, 5, 5], %% next_ts/1 arguments
+  Seq = [4,     5, 4, 3, 3, 2, 6], %% gululog_dt:os_sec return values
+  Exp = [4,     5, 5, 5, 5, 5, 6], %% expected result of next_ts/1
+  meck:sequence(gululog_dt, os_sec, 0, Seq),
+  ArgExp = lists:zip(Arg, Exp),
+  lists:foreach(fun({Arg_, Exp_}) ->
+                  ?assertEqual(Exp_, next_ts(Arg_))
+                end, ArgExp),
+  meck:unload(gululog_dt),
+  ok.
 
 -endif.
 

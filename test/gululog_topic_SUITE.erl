@@ -17,6 +17,7 @@
 -export([ t_basic_flow/1
         , t_truncate/1
         , t_delete_oldest_seg/1
+        , t_get_oldest_seg_age_seg/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -49,12 +50,18 @@ t_basic_flow(Config) when is_list(Config) ->
   Dir = ?config(dir),
   T0 = gululog_topic:init(Dir, [{segMB, 1}]),
   Body = fun(C) -> list_to_binary(lists:duplicate(500000, C)) end,
+  Ts = gululog_dt:os_sec(),
   T1 = gululog_topic:append(T0, <<"header0">>, Body($0)),
+  ?assertMatch({0, _}, gululog_topic:get_latest_logid_and_ts(T1)),
   T2 = gululog_topic:append(T1, <<"header1">>, Body($1)),
+  ?assertMatch({1, _}, gululog_topic:get_latest_logid_and_ts(T2)),
   T3 = gululog_topic:append(T2, <<"header2">>, Body($2)),
+  ?assertMatch({2, _}, gululog_topic:get_latest_logid_and_ts(T3)),
   ok = gululog_topic:close(T3),
   T4 = gululog_topic:init(Dir, [{segMB, 1}]),
   T5 = gululog_topic:append(T4, <<"header3">>, Body($3)),
+  ?assertMatch({3, _}, gululog_topic:get_latest_logid_and_ts(T5)),
+  ?assertEqual(0, gululog_topic:first_logid_since(T5, Ts)),
   ok = gululog_topic:close(T5),
   Files = [ idx_name(Dir, 0)
           , idx_name(Dir, 2)
@@ -91,7 +98,7 @@ t_truncate({'end', _Config}) ->
 t_truncate(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = filename:join(Dir, "backup"),
-  CaseList =
+  ChangeList =
     [ {append,       <<"key">>, <<"value">>}
     , {append,       <<"key">>, <<"value">>}
     , {append,       <<"key">>, <<"value">>}
@@ -112,7 +119,7 @@ t_truncate(Config) when is_list(Config) ->
                 gululog_topic:append(IdxIn, Header, Body);
              (force_switch, IdxIn) ->
                 gululog_topic:force_switch(IdxIn)
-          end, gululog_topic:init(Dir, []), CaseList),
+          end, gululog_topic:init(Dir, []), ChangeList),
   %% 1st truncate
   {T15, Result1} = gululog_topic:truncate(T14, 10, ?undef),
   ?assertEqual([], Result1),
@@ -140,14 +147,12 @@ t_truncate(Config) when is_list(Config) ->
                                    ++ gululog_name:wildcard_seg_name_reversed(BackupDir))),
   ok = gululog_topic:close(T18).
 
-t_delete_oldest_seg({init, Config}) ->
-  Config;
-t_delete_oldest_seg({'end', _Config}) ->
-  ok;
+t_delete_oldest_seg({init, Config}) -> Config;
+t_delete_oldest_seg({'end', _Config}) -> ok;
 t_delete_oldest_seg(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = filename:join(Dir, "backup"),
-  CaseList =
+  ChangeList =
     [ {append,       <<"key">>, <<"value">>} %% logid = 0, segid = 0
     , force_switch
     , {append,       <<"key">>, <<"value">>} %% logid = 1, segid = 1
@@ -156,11 +161,11 @@ t_delete_oldest_seg(Config) when is_list(Config) ->
     ],
   %% generate test case data
   T0 = lists:foldl(
-         fun({append, Header, Body}, IdxIn) ->
-               gululog_topic:append(IdxIn, Header, Body);
-            (force_switch, IdxIn) ->
-               gululog_topic:force_switch(IdxIn)
-         end, gululog_topic:init(Dir, []), CaseList),
+         fun({append, Header, Body}, TopicIn) ->
+               gululog_topic:append(TopicIn, Header, Body);
+            (force_switch, TopicIn) ->
+               gululog_topic:force_switch(TopicIn)
+         end, gululog_topic:init(Dir, []), ChangeList),
   %% first
   {T1, FileOps1} = gululog_topic:delete_oldest_seg(T0),
   ?assertEqual([{?OP_DELETED, idx_name(Dir, 0)},
@@ -176,6 +181,49 @@ t_delete_oldest_seg(Config) when is_list(Config) ->
   {T3, FileOps3} = gululog_topic:delete_oldest_seg(T2),
   ?assertEqual([], FileOps3),
   ok = gululog_topic:close(T3).
+
+t_get_oldest_seg_age_seg({init, Config}) ->
+  meck:new(gululog_dt, [passthrough, no_passthrough_cover]),
+  Config;
+t_get_oldest_seg_age_seg({'end', _Config}) ->
+  meck:unload(gululog_dt),
+  ok;
+t_get_oldest_seg_age_seg(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  OpList =
+    [ {append, 0}
+    , {expect, 0}
+    , force_switch
+    , {expect, 0}
+    , delete_oldest
+    , {expect, false}
+    , {append, 1}
+    , {expect, -1}
+    , {append, 1}
+    , {expect, -1}
+    , {append, 2}
+    , {expect, -2}
+    , force_switch
+    , {expect, -2}
+    , {append, 3}
+    , {expect, -2}
+    ],
+  SetTime = fun(Timestamp) -> meck:expect(gululog_dt, os_sec, 0, Timestamp) end,
+  lists:foldl(
+    fun({append, OnTimestamp}, TopicIn) ->
+          SetTime(OnTimestamp),
+          gululog_topic:append(TopicIn, <<"header">>, <<"body">>);
+       (force_switch, TopicIn) ->
+          gululog_topic:force_switch(TopicIn);
+       (delete_oldest, TopicIn) ->
+          {TopicOut, _} = gululog_topic:delete_oldest_seg(TopicIn),
+          TopicOut;
+       ({expect, ExpectedAge}, Topic) ->
+          SetTime(0), %% set current time to 0 for deterministic
+          ?assertEqual(ExpectedAge, gululog_topic:get_oldest_seg_age_sec(Topic)),
+          Topic
+    end, gululog_topic:init(Dir, []), OpList),
+  ok.
 
 %%%_* Help functions ===========================================================
 
