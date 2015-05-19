@@ -3,10 +3,11 @@
 %% Timestamp: Sever time in second precision.
 %% SegId: The fist log ID in a log segment file, SegId is used as file name.
 %% Position: Log byte position (see file:position/1) in a segment file
+%% @end
 
 -module(gululog_idx).
 
-%% APIs for writer (owner)
+%% Write APIs
 -export([ init/1              %% Initialize log index from the given log file directory
         , flush_close/1       %% close the writer cursor
         , append/4            %% Append a new log entry to index
@@ -17,7 +18,7 @@
         , truncate/5          %% Truncate cache and file from the given logid (inclusive)
         ]).
 
-%% APIs for readers (public access)
+%% Read APIs
 -export([ locate/3            %% Locate {SegId, Position} for a given LogId
         , get_oldest_segid/1  %% Get oldest segid
         , get_latest_logid/1  %% Latest logid in ets
@@ -25,13 +26,14 @@
         , get_seg_oldest_ts/3 %% timestamp of the oldest log entrie in the given segment
         , get_seg_latest_ts/3 %% timestamp of the latest log entrie in the given segment
         , first_logid_since/3 %% First logid since the given timestamp (second inclusive)
-        , init_cache/1
-        , close_cache/1
-        , locate_in_cache/2
         ]).
 
-%% APIs for repair / truncation
--export([get_position_in_index_file/2]).
+%% APIs for internal use
+-export([ init_cache/1
+        , close_cache/1
+        , locate_in_cache/2
+        , get_position_in_index_file/2
+        ]).
 
 -export_type([ index/0
              , cache/0

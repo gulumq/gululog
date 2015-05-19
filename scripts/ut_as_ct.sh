@@ -14,6 +14,6 @@ cp test/gululog_ut_SUITE.erl.in test/gululog_ut_SUITE.erl
 
 # generate a test case in gululog_ut_SUITE.erl
 for i in $UT_MODULES; do
-  echo -e "t_$i(_Config) -> ?assertEqual(ok, $i:test()).\n" >> test/gululog_ut_SUITE.erl
+  echo -e "t_$i(_Config) -> ?assertEqual(ok, eunit:test($i, [verbose])).\n" >> test/gululog_ut_SUITE.erl
 done
 
