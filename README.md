@@ -1,2 +1,4 @@
 # gululog
 
+indexed binary log
+
