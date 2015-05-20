@@ -9,6 +9,7 @@
 
 %% Write APIs
 -export([ init/1              %% Initialize log index from the given log file directory
+        , init/2              %% Initialize log index from the given log file directory and the first logid
         , flush_close/1       %% close the writer cursor
         , append/4            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
@@ -71,15 +72,18 @@
 
 %%%*_ API FUNCTIONS ============================================================
 
+%% @equiv init(dirname(), 0).
+init(Dir) -> init(Dir, 0).
+
 %% @doc Initialize log index in the given directory.
 %% The directory is created if not exists already
 %% New index file is initialized if the given directry is empty
 %% @end
--spec init(dirname()) -> index().
-init(Dir) ->
+-spec init(dirname(), segid()) -> index().
+init(Dir, OldestSegId) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
   {IsNew, IndexFiles} = case wildcard_reversed(Dir) of
-                          []    -> {true, [mk_name(Dir, 0)]};
+                          []    -> {true, [mk_name(Dir, OldestSegId)]};
                           Files -> {false, Files}
                         end,
   LatestSegment = hd(IndexFiles),
@@ -97,7 +101,8 @@ init(Dir) ->
 init_cache(IndexFiles) ->
   Tid = ets:new(?MODULE, [ ordered_set
                          , public
-                         , {read_concurrency, true} ]),
+                         , {read_concurrency, true}
+                         ]),
   ok = init_cache_from_files(Tid, IndexFiles),
   Tid.
 

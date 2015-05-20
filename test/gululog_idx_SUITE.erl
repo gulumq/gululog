@@ -160,7 +160,7 @@ t_truncated_latest_logid(Config) when is_list(Config) ->
   Idx0 = gululog_idx:init(Dir),
   ?assertEqual(2, gululog_idx:get_latest_logid(Idx0)),
   Idx1 = gululog_idx:delete_from_cache(Idx0, 1),
-  {Idx, _} = gululog_idx:truncate(Dir, Idx0, 0, 2, ?undef),
+  {Idx, _} = gululog_idx:truncate(Dir, Idx1, 0, 2, ?undef),
   ?assertEqual(1, gululog_idx:get_latest_logid(Idx)),
   ok.
 

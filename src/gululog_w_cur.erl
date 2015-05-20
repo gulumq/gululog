@@ -7,6 +7,7 @@
 -module(gululog_w_cur).
 
 -export([ open/1
+        , open/2
         , append/4
         , flush_close/1
         , switch/3
@@ -38,11 +39,17 @@
 -spec next_log_position(cursor()) -> position().
 next_log_position(#wcur{position = Position}) -> Position.
 
+%% @equiv open(dirname(), 0).
+open(Dir) -> open(Dir, 0).
+
 %% @doc Open the last segment file the given directory for writer to append.
--spec open(dirname()) -> cursor().
-open(Dir) ->
+-spec open(dirname(), segid()) -> cursor().
+open(Dir, OldestSegId) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
-  open_do(Dir, wildcard_reverse(Dir)).
+  case wildcard_reverse(Dir) of
+    []         -> open_new_seg(Dir, OldestSegId);
+    [File | _] -> open_existing_seg(File)
+  end.
 
 %% @doc Flush os disk cache, close fd.
 -spec flush_close(cursor()) -> ok.
@@ -104,7 +111,12 @@ truncate(Dir, Cur, SegId, Position, BackupDir) ->
     end,
   DeleteResult = truncate_delete_do(DeleteFiles, BackupDir),
   TruncateResult = truncate_truncate_do(TruncateFile, Position, BackupDir),
-  {open_do(Dir, KeepFiles), DeleteResult ++ TruncateResult}.
+  NewCur =
+    case KeepFiles of
+      []         -> open_new_seg(Dir, SegId);
+      [File | _] -> open_existing_seg(File)
+    end,
+  {NewCur, DeleteResult ++ TruncateResult}.
 
 %% @doc Delete segment file for the given segid.
 %% Return new curosr() and the delete file with OP tag
@@ -119,14 +131,10 @@ delete_seg(Dir, #wcur{segid = CurrentSegId} = Cur, SegId, BackupDir) ->
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Help function to open the wrter cursor.
-%% NB! files should be given in reversed order.
-%% @end
--spec open_do(dirname(), [filename()]) -> cursor().
-open_do(Dir, []) ->
-  open_new_seg(Dir, 0);
-open_do(_Dir, [LatestSegFile | _]) ->
-  SegId = gululog_name:filename_to_segid(LatestSegFile),
-  {ok, Fd} = file:open(LatestSegFile, [write, read, raw, binary]),
+-spec open_existing_seg(filename()) -> cursor().
+open_existing_seg(FileName) ->
+  SegId = gululog_name:filename_to_segid(FileName),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
   {ok, <<Version:8>>} = file:read(Fd, 1),
   true = (Version =< ?LOGVSN), %% assert
   %% In case Version < ?LOGVSN, the caller should
