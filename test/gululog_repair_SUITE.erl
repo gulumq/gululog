@@ -57,7 +57,7 @@ t_nothing_to_repair({init, Config}) -> Config;
 t_nothing_to_repair({'end', _Config}) -> ok;
 t_nothing_to_repair(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  ?assertEqual({ok, []}, gululog_repair:repair_dir(Dir)).
+  ?assertEqual({ok, []}, gululog_repair:repair_dir(Dir, 0, ?undef)).
 
 
 %% @doc No index file paired with a segment file.
@@ -73,7 +73,7 @@ t_backup_seg({'end', _Config}) -> ok;
 t_backup_seg(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   SegFile = gululog_name:mk_seg_name(Dir, 0),
   ?assertEqual([{?OP_DELETED, SegFile}], RepairedFiles),
   BackupFile = gululog_name:mk_seg_name(BackupDir, 0),
@@ -97,7 +97,7 @@ t_backup_idx({'end', _Config}) -> ok;
 t_backup_idx(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
@@ -130,7 +130,7 @@ t_truncate_corrupted_1st_log_body({'end', _Config}) -> ok;
 t_truncate_corrupted_1st_log_body(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   Idx0BackupFile = gululog_name:mk_idx_name(BackupDir, 0),
@@ -164,7 +164,7 @@ t_truncate_index_ahead({'end', _Config}) -> ok;
 t_truncate_index_ahead(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   ?assertEqual([{?OP_TRUNCATED, Idx0File}], RepairedFiles),
@@ -200,7 +200,7 @@ t_truncate_seg_ahead({'end', _Config}) -> ok;
 t_truncate_seg_ahead(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
   ?assertEqual([{?OP_TRUNCATED, Seg0File}], RepairedFiles),
@@ -240,7 +240,7 @@ t_empty_seg_file({'end', _Config}) -> ok;
 t_empty_seg_file(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
@@ -277,7 +277,7 @@ t_empty_idx_file({'end', _Config}) -> ok;
 t_empty_idx_file(Config) when is_list(Config) ->
   Dir = ?config(dir),
   BackupDir = ?config(backup_dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, BackupDir),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, BackupDir),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
@@ -310,7 +310,7 @@ t_empty_idx_and_seg_file({init, Config}) ->
 t_empty_idx_and_seg_file({'end', _Config}) -> ok;
 t_empty_idx_and_seg_file(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, ?undef),
+  {ok, RepairedFiles} = gululog_repair:repair_dir(Dir, 0, ?undef),
   Idx0File = gululog_name:mk_idx_name(Dir, 0),
   Idx1File = gululog_name:mk_idx_name(Dir, 1),
   Seg0File = gululog_name:mk_seg_name(Dir, 0),
