@@ -30,7 +30,7 @@
                , segMB = ?INIT_ERR(segMB) :: bytecnt()
                , idx                      :: index()
                , cur                      :: cursor()
-               , last_logid               :: false | logid()
+               , last_logid               :: -1 | logid()
                , last_ts                  :: false | os_sec()
                }).
 
@@ -52,18 +52,22 @@
 -spec init(dirname(), options()) -> topic().
 init(Dir, Options) ->
   SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
-  BackupDir = keyget(backup_dir, Options, ?undef),
   InitFromSegId = keyget(init_segid, Options, 0),
   Cur = gululog_w_cur:open(Dir, InitFromSegId),
   Idx = gululog_idx:init(Dir, InitFromSegId),
-  maybe_switch_to_new_version(
+  LastLogId = case gululog_idx:get_latest_logid(Idx) of
+                false -> InitFromSegId - 1;
+                LogId -> LogId
+              end,
+  Topic =
     #topic{ dir        = Dir
           , idx        = Idx
           , cur        = Cur
           , segMB      = SegMB
-          , last_logid = gululog_idx:get_latest_logid(Idx)
+          , last_logid = LastLogId
           , last_ts    = gululog_idx:get_latest_ts(Idx)
-          }).
+          },
+  maybe_switch_to_new_version(Topic).
 
 %% @doc Append a new log entry to the given topic.
 %% Index and segments are switched to new files in case the segment file has
@@ -104,7 +108,7 @@ append(#topic{ dir        = Dir
 get_latest_logid_and_ts(#topic{ last_logid = LogId
                               , last_ts    = Ts
                               }) ->
-  LogId =/= false andalso {LogId, Ts}.
+  Ts =/= false andalso {LogId, Ts}.
 
 %% @doc Get the age (in seconds) of the oldest segment.
 %% The age of a segment = the age of the latest log entrie in the segment.
@@ -185,8 +189,7 @@ delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, BackupDir) ->
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Keep logid sequential.
-next_logid(false) -> 0;
-next_logid(LogId) -> LogId + 1.
+next_logid(LogId) when is_integer(LogId) -> LogId + 1.
 
 %% @private Keep timestamp monotonic.
 next_ts(false) ->

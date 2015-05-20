@@ -4,7 +4,7 @@
 
 -module(gululog_repair).
 
--export([ repair_dir/3
+-export([ repair_dir/2
         ]).
 
 %%%*_ MACROS and SPECS =========================================================
@@ -22,16 +22,15 @@
 %% 1. remove (maybe backup) unpaired .idx and .seg fiels.
 %% 2. truncate the corrupted .idx and .seg tails
 %%    (files are backed up before truncate if backup dir is given).
-%% 3. files before the given initial segid are deleted (maybe backup)
 %% @end
--spec repair_dir(dirname(), segid(), ?undef | dirname()) ->
+-spec repair_dir(dirname(), ?undef | dirname()) ->
         {ok, [{file_op()}]}.
-repair_dir(Dir, InitSegId, BackupDir) ->
+repair_dir(Dir, BackupDir) ->
   case filelib:is_dir(Dir) of
     true ->
       IdxFiles = gululog_name:wildcard_idx_name_reversed(Dir),
       SegFiles = gululog_name:wildcard_seg_name_reversed(Dir),
-      RepairedFiles1 = repair_dir(InitSegId, IdxFiles, SegFiles, BackupDir),
+      RepairedFiles1 = repair_dir(IdxFiles, SegFiles, BackupDir),
       RemovedFiles = [F || {_ReapirTag, F} <- RepairedFiles1],
       RepairedFiles2 = repair_seg(IdxFiles -- RemovedFiles,
                                   SegFiles -- RemovedFiles,
@@ -47,26 +46,23 @@ repair_dir(Dir, InitSegId, BackupDir) ->
 %% @private Repair log integrity in the given dir.
 %% remove (backup if backup dir is given) unpaired index and segment files
 %% @end
--spec repair_dir(segid(), [filename()], [filename()], ?undef | dirname()) -> [file_op()].
-repair_dir(InitSegId, IdxFiles, SegFiles, BackupDir) ->
-  IdxSegIds = sets:from_list(lists:map(fun gululog_name:filename_to_segid/1, IdxFiles)),
-  SegSegIds = sets:from_list(lists:map(fun gululog_name:filename_to_segid/1, SegFiles)),
-  IdxFilesToDelete =
+-spec repair_dir([filename()], [filename()], ?undef | dirname()) -> [file_op()].
+repair_dir(IdxFiles, SegFiles, BackupDir) ->
+  ToSegIdFun = fun gululog_name:filename_to_segid/1,
+  IdxSegIds = sets:from_list(lists:map(ToSegIdFun, IdxFiles)),
+  SegSegIds = sets:from_list(lists:map(ToSegIdFun, SegFiles)),
+  UnpairedIdxFiles =
     lists:filter(
       fun(IdxFile) ->
-        SegId = gululog_name:filename_to_segid(IdxFile),
-        SegId < InitSegId orelse
-        not sets:is_element(SegId, SegSegIds)
+        not sets:is_element(ToSegIdFun(IdxFile), SegSegIds)
       end, IdxFiles),
-  SegFilesToDelete =
+  UnpairedSegFiles =
     lists:filter(
       fun(SegFile) ->
-        SegId = gululog_name:filename_to_segid(SegFile),
-        SegId < InitSegId orelse
-        not sets:is_element(SegId, IdxSegIds)
+        not sets:is_element(ToSegIdFun(SegFile), IdxSegIds)
       end, SegFiles),
   lists:map(fun(FileName) -> gululog_file:delete(FileName, BackupDir) end,
-            IdxFilesToDelete ++ SegFilesToDelete).
+            UnpairedIdxFiles ++ UnpairedSegFiles).
 
 %% @private Repair segment file.
 %% Assuming that the index file is never corrupted.

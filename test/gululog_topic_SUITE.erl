@@ -15,6 +15,7 @@
 
 %% cases
 -export([ t_basic_flow/1
+        , t_init_with_segid/1
         , t_truncate/1
         , t_delete_oldest_seg/1
         , t_get_oldest_seg_age_seg/1
@@ -88,7 +89,34 @@ t_basic_flow(Config) when is_list(Config) ->
   ?assertMatch(#gululog{header = <<"header3">>, body = <<"3", _/binary>>}, Log4),
   ?assertEqual(eof, gululog_r_cur:read(C5)),
   ok = gululog_r_cur:close(C5),
+  ok.
 
+%% @doc Init topic with a given segid as the first one.
+t_init_with_segid({init, Config}) ->
+  Config;
+t_init_with_segid({'end', _Config}) ->
+  ok;
+t_init_with_segid(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  T0 = gululog_topic:init(Dir, [{segMB, 1}, {init_segid, 42}]),
+  ?assertEqual(false, gululog_topic:get_latest_logid_and_ts(T0)),
+  T1 = gululog_topic:append(T0, <<"h">>, <<"b">>),
+  ?assertMatch({42, _}, gululog_topic:get_latest_logid_and_ts(T1)),
+  ok = gululog_topic:close(T1),
+
+  C0 = gululog_r_cur:open(Dir, 42),
+  {C1, Log0} = gululog_r_cur:read(C0),
+  ?assertMatch(#gululog{header = <<"h">>, body = <<"b">>}, Log0),
+  ?assertEqual(eof, gululog_r_cur:read(C1)),
+  ok = gululog_r_cur:close(C1),
+
+  Files = [ idx_name(Dir, 42)
+          , seg_name(Dir, 42)
+          ],
+  lists:foreach(
+    fun(File) ->
+      ?assertEqual(true, filelib:is_file(File))
+    end, Files),
   ok.
 
 t_truncate({init, Config}) ->
