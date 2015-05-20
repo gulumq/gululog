@@ -6,8 +6,7 @@
 
 -module(gululog_w_cur).
 
--export([ open/1
-        , open/2
+-export([ open/2
         , append/4
         , flush_close/1
         , switch/3
@@ -38,9 +37,6 @@
 %% @doc Get the position (byte offset) in segment file for the next log to be appended.
 -spec next_log_position(cursor()) -> position().
 next_log_position(#wcur{position = Position}) -> Position.
-
-%% @equiv open(dirname(), 0).
-open(Dir) -> open(Dir, 0).
 
 %% @doc Open the last segment file the given directory for writer to append.
 -spec open(dirname(), segid()) -> cursor().

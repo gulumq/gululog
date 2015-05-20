@@ -66,7 +66,7 @@ t_nothing_to_repair(Config) when is_list(Config) ->
 t_backup_seg({init, Config}) ->
   Dir = ?config(dir),
   %% add a new segment file but no index file
-  Cur = gululog_w_cur:open(Dir),
+  Cur = gululog_w_cur:open(Dir, 0),
   ok = gululog_w_cur:flush_close(Cur),
   Config;
 t_backup_seg({'end', _Config}) -> ok;
@@ -89,7 +89,7 @@ t_backup_idx({init, Config}) ->
   Topic1 = gululog_topic:append(Topic0, <<"header">>, <<"body">>),
   ok = gululog_topic:close(Topic1),
   %% add a new segment file but no index file
-  Idx0 = gululog_idx:init(Dir),
+  Idx0 = gululog_idx:init(Dir, 0),
   Idx = gululog_idx:switch(Dir, Idx0, 1),
   ok = gululog_idx:flush_close(Idx),
   Config;
@@ -155,7 +155,7 @@ t_truncate_index_ahead({init, Config}) ->
   Topic1 = gululog_topic:append(Topic0, <<"header">>, <<"body">>),
   ok = gululog_topic:close(Topic1),
   %% write ahead some index entries.
-  Idx0 = gululog_idx:init(Dir),
+  Idx0 = gululog_idx:init(Dir, 0),
   Idx1 = gululog_idx:append(Idx0, 1, 100, gululog_dt:os_sec()),
   Idx2 = gululog_idx:append(Idx1, 2, 2000, gululog_dt:os_sec()),
   ok = gululog_idx:flush_close(Idx2),
@@ -177,7 +177,7 @@ t_truncate_index_ahead(Config) when is_list(Config) ->
   ?assertEqual(true, filelib:is_file(Idx0BackupFile)),
   ?assertEqual(false, filelib:is_file(Seg0BackupFile)),
   %% initialize index for sanity check.
-  Idx = gululog_idx:init(Dir),
+  Idx = gululog_idx:init(Dir, 0),
   ?assertEqual(0, gululog_idx:get_latest_logid(Idx)),
   ok.
 
@@ -191,7 +191,7 @@ t_truncate_seg_ahead({init, Config}) ->
   Topic1 = gululog_topic:append(Topic0, <<"header0">>, <<"body0">>),
   ok = gululog_topic:close(Topic1),
   %% write ahead some log entries in seg file
-  Cur0 = gululog_w_cur:open(Dir),
+  Cur0 = gululog_w_cur:open(Dir, 0),
   Cur1 = gululog_w_cur:append(Cur0, 1, <<"header1">>, <<"body1">>),
   Cur2 = gululog_w_cur:append(Cur1, 1, <<"header2">>, <<"body2">>),
   gululog_w_cur:flush_close(Cur2),
@@ -230,7 +230,7 @@ t_empty_seg_file({init, Config}) ->
   Topic1 = gululog_topic:append(Topic0, <<"header0">>, OneMB_Body),
   ok = gululog_topic:close(Topic1),
   %% switch to new segment, append index entry
-  Idx0 = gululog_idx:init(Dir),
+  Idx0 = gululog_idx:init(Dir, 0),
   Idx1 = gululog_idx:switch_append(Dir, Idx0, 1, 1, gululog_dt:os_sec()),
   ok = gululog_idx:flush_close(Idx1),
   %% make an empty segment file
@@ -267,7 +267,7 @@ t_empty_idx_file({init, Config}) ->
   Topic1 = gululog_topic:append(Topic0, <<"header0">>, <<"body0">>),
   ok = gululog_topic:close(Topic1),
   %% append a new log entry to segment file
-  Cur0 = gululog_w_cur:open(Dir),
+  Cur0 = gululog_w_cur:open(Dir, 0),
   Cur1 = gululog_w_cur:switch_append(Dir, Cur0, 1, <<"h1">>, <<"b1">>),
   ok = gululog_w_cur:flush_close(Cur1),
   %% make an empty idx file

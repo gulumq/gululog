@@ -8,8 +8,7 @@
 -module(gululog_idx).
 
 %% Write APIs
--export([ init/1              %% Initialize log index from the given log file directory
-        , init/2              %% Initialize log index from the given log file directory and the first logid
+-export([ init/2              %% Initialize log index from the given log file directory and the first logid
         , flush_close/1       %% close the writer cursor
         , append/4            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
@@ -71,9 +70,6 @@
 -define(EOT, '$end_of_table').
 
 %%%*_ API FUNCTIONS ============================================================
-
-%% @equiv init(dirname(), 0).
-init(Dir) -> init(Dir, 0).
 
 %% @doc Initialize log index in the given directory.
 %% The directory is created if not exists already
@@ -306,7 +302,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
       false ->
         [] = wildcard_reversed(Dir), %% assert
         ok = close_cache(Tid),
-        init(Dir);
+        init(Dir, SegId);
       PrevLogId ->
         NewSegId = get_segid(Tid, PrevLogId),
         NewTid   = truncate_cache(Tid, mk_name(Dir, NewSegId), LogId),
@@ -667,7 +663,7 @@ is_empty_cache(Tid) -> ?EOT =:= ets:first(Tid).
 cache_help_fun_test() ->
   {ok, Cwd} = file:get_cwd(),
   Dir = filename:join(Cwd, "gululog_idx-cache_help_fun_test"),
-  #idx{tid = Tid} = Idx0 = init(Dir),
+  #idx{tid = Tid} = Idx0 = init(Dir, 0),
   ?assertEqual(false, first_in_cache(Tid)),
   ?assertEqual(false, last_in_cache(Tid)),
   ?assertEqual(false, prev_logid(Tid, 0)),
@@ -681,7 +677,7 @@ cache_help_fun_test() ->
 basic_find_logid_by_ts_test() ->
   {ok, Cwd} = file:get_cwd(),
   Dir = filename:join(Cwd, "gululog_idx-basic_find_logid_by_ts_test"),
-  Idx0 = init(Dir),
+  Idx0 = init(Dir, 0),
   ?assertEqual(false, first_logid_since(Dir, Idx0, gululog_dt:os_sec())),
   Ts = gululog_dt:os_sec(),
   VerifyFun = fun(Idx) ->
@@ -703,7 +699,7 @@ basic_find_logid_by_ts_test() ->
 seg_ts_test() ->
   {ok, Cwd} = file:get_cwd(),
   Dir = filename:join(Cwd, "gululog_idx-seg_ts_test"),
-  Idx0 = init(Dir),
+  Idx0 = init(Dir, 0),
   ?assertEqual(false, get_seg_oldest_ts(Dir, Idx0, 0)),
   ?assertEqual(false, get_seg_latest_ts(Dir, Idx0, 0)),
   FunL =
@@ -789,7 +785,7 @@ gululog_idx_test_() ->
                  ({switch_append, LogId, Position}, IdxIn) ->
                     %% Ts = Logid for deterministic
                     switch_append(Dir, IdxIn, LogId, Position, _Ts = LogId)
-              end, init(Dir), DataList),
+              end, init(Dir, 0), DataList),
       ok = flush_close(Idx)
     end
   , fun(_) ->
@@ -800,7 +796,7 @@ gululog_idx_test_() ->
           Dir             = test_dir(),
           BackupDir       = filename:join(Dir, "backup"),
           BackupDirDelete = filename:join(Dir, "backup_delete"),
-          Idx0 = init(Dir),
+          Idx0 = init(Dir, 0),
           ?assertMatch(
             [ ?ENTRY(0,  _, 0, 1)
             , ?ENTRY(1,  _, 0, 10)
@@ -865,7 +861,7 @@ gululog_idx_test_() ->
           ?assertEqual([], ets:tab2list(Idx17#idx.tid)),
           %% re-init
           ok = flush_close(Idx17),
-          NewIdx = init(Dir),
+          NewIdx = init(Dir, 0),
           NewEtsTable = NewIdx#idx.tid,
           ?assertEqual([], ets:tab2list(NewEtsTable)),
           ok = flush_close(NewIdx),
@@ -876,7 +872,7 @@ gululog_idx_test_() ->
       , fun() ->
           Dir = test_dir(),
           BackupDir = filename:join(Dir, "backup"),
-          Idx0 = init(Dir),
+          Idx0 = init(Dir, 0),
           DeleteFile1 = mk_name(Dir, 0),
           ?assertEqual({Idx0, {0, {?OP_DELETED, DeleteFile1}}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           ?assertEqual(false, lists:member(DeleteFile1, wildcard_reversed(Dir))),
@@ -890,19 +886,19 @@ gululog_idx_test_() ->
     , { "delete old seg + truncate"
       , fun() ->
           Dir = test_dir(),
-          Idx0 = init(Dir),
+          Idx0 = init(Dir, 0),
           ?assertMatch({_, {0, _}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           Files = lists:sort(wildcard_reversed(Dir)),
           {Idx1, Truncated} = truncate(Dir, Idx0, 5, 5, ?undef),
           FilesDeleted = lists:sort(lists:map(fun({?OP_DELETED, Fn}) -> Fn end, Truncated)),
           ?assertEqual(Files, FilesDeleted),
-          ?assertEqual(0, Idx1#idx.segid)
+          ?assertEqual(5, Idx1#idx.segid)
         end
       }
     , { "delete + find logid by ts"
       , fun() ->
           Dir = test_dir(),
-          Idx0 = init(Dir),
+          Idx0 = init(Dir, 0),
           TsVerifyFun =
             fun(Idx) ->
               lists:foreach(fun(_Ts = LogId) ->

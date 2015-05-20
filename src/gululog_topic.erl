@@ -49,14 +49,13 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Initialize topic from the given directory.
-%% Assuming the directory has integrity in log files ensured by
-%% gululog_repair:repair_dir/2
-%% @end
 -spec init(dirname(), options()) -> topic().
 init(Dir, Options) ->
   SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
-  Cur = gululog_w_cur:open(Dir),
-  Idx = gululog_idx:init(Dir),
+  BackupDir = keyget(backup_dir, Options, ?undef),
+  InitFromSegId = keyget(init_segid, Options, 0),
+  Cur = gululog_w_cur:open(Dir, InitFromSegId),
+  Idx = gululog_idx:init(Dir, InitFromSegId),
   maybe_switch_to_new_version(
     #topic{ dir        = Dir
           , idx        = Idx
