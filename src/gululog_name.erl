@@ -70,7 +70,7 @@ basename(SegId) ->
 
 -spec pad0(filename(), non_neg_integer()) -> filename().
 pad0(Name, 0) -> Name;
-pad0(Name, N) -> pad0([$0 | Name], N-1).
+pad0(Name, N) when N > 0 -> pad0([$0 | Name], N-1).
 
 %%%*_ TESTS ====================================================================
 
