@@ -305,7 +305,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
         init(Dir, SegId);
       PrevLogId ->
         NewSegId = get_segid(Tid, PrevLogId),
-        NewTid   = truncate_cache(Tid, mk_name(Dir, NewSegId), LogId),
+        NewTid   = truncate_cache(Tid, LogId),
         FileName = mk_name(Dir, NewSegId),
         {Version, NewFd} = open_writer_fd(false, FileName),
         Idx#idx{ version = Version
@@ -335,12 +335,10 @@ read_entry(Dir, Tid, LogId) ->
 %% @private Truncate cache, from the given logid (inclusive).
 %% re-initialize the cache for last segment in case there are entries deleted.
 %% @end
--spec truncate_cache(cache(), filename(), logid()) -> cache().
-truncate_cache(Tid, NewSegIdxFile, LogId) ->
+-spec truncate_cache(cache(), logid()) -> cache().
+truncate_cache(Tid, LogId) ->
   Ms = ets:fun2ms(fun(?ENTRY(LogIdX, _, _, _)) -> LogIdX >= LogId end),
   _  = ets:select_delete(Tid, Ms),
-  %%   To make sure that the latest entry is always in cache.
-  ok = init_cache_from_file(NewSegIdxFile, Tid),
   Tid.
 
 %% @private Get the latest cached entry which has timestamp before the given Ts.
