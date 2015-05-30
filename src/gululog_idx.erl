@@ -305,7 +305,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
         init(Dir, SegId);
       PrevLogId ->
         NewSegId = get_segid(Tid, PrevLogId),
-        NewTid   = truncate_cache(Tid, LogId),
+        NewTid   = truncate_cache(Tid, mk_name(Dir, NewSegId), LogId),
         FileName = mk_name(Dir, NewSegId),
         {Version, NewFd} = open_writer_fd(false, FileName),
         Idx#idx{ version = Version
@@ -335,10 +335,12 @@ read_entry(Dir, Tid, LogId) ->
 %% @private Truncate cache, from the given logid (inclusive).
 %% re-initialize the cache for last segment in case there are entries deleted.
 %% @end
--spec truncate_cache(cache(), logid()) -> cache().
-truncate_cache(Tid, LogId) ->
+-spec truncate_cache(cache(), filename(), logid()) -> cache().
+truncate_cache(Tid, NewSegIdxFile, LogId) ->
   Ms = ets:fun2ms(fun(?ENTRY(LogIdX, _, _, _)) -> LogIdX >= LogId end),
   _  = ets:select_delete(Tid, Ms),
+  %%   To make sure that the latest entry is always in cache.
+  ok = restore_cache_from_latest_entry(NewSegIdxFile, Tid),
   Tid.
 
 %% @private Get the latest cached entry which has timestamp before the given Ts.
@@ -524,6 +526,30 @@ init_cache_from_file(_Version = 1, Tid, SegId, Fd) ->
       [ ets:insert(Tid, from_file_entry(1, SegId, <<E:?FILE_ENTRY_BITS_V1>>))
         || <<E:?FILE_ENTRY_BITS_V1>> <= ChunkBin ],
       init_cache_from_file(1, Tid, SegId, Fd)
+  end.
+
+-spec restore_cache_from_latest_entry(filename(), cache()) -> ok.
+restore_cache_from_latest_entry(FileName, Tid) ->
+  SegId = gululog_name:filename_to_segid(FileName),
+  Fd = open_reader_fd(FileName),
+  try file:read(Fd, 1) of
+    eof                 ->
+      ok;
+    {ok, <<Version:8>>} ->
+      ok = restore_cache_from_latest_entry(Version, Tid, Fd, SegId, <<>>)
+  after
+    ok = file:close(Fd)
+  end.
+
+-spec restore_cache_from_latest_entry(logvsn(), cache(), file:fd(), segid(), binary()) -> ok.
+restore_cache_from_latest_entry(_Version = 1, Tid, Fd, SegId, ChunkBin) ->
+  case file:read(Fd, ?FILE_ENTRY_BITS_V1 * ?FILE_READ_CHUNK) of
+    eof ->
+      [ ets:insert(Tid, from_file_entry(1, SegId, <<E:?FILE_ENTRY_BITS_V1>>))
+        || <<E:?FILE_ENTRY_BITS_V1>> <= ChunkBin],
+      ok;
+    {ok, TmpChunkBin} ->
+      restore_cache_from_latest_entry(1, Tid, Fd, SegId, TmpChunkBin)
   end.
 
 %% @private Find all the index files in the given directory
