@@ -528,6 +528,7 @@ init_cache_from_file(_Version = 1, Tid, SegId, Fd) ->
       init_cache_from_file(1, Tid, SegId, Fd)
   end.
 
+%% @private Restore ets table record from index latest entry.
 -spec restore_cache_from_latest_entry(filename(), cache()) -> ok.
 restore_cache_from_latest_entry(FileName, Tid) ->
   SegId = gululog_name:filename_to_segid(FileName),
