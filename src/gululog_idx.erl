@@ -305,7 +305,7 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
         init(Dir, SegId);
       PrevLogId ->
         NewSegId = get_segid(Tid, PrevLogId),
-        NewTid   = truncate_cache(Tid, mk_name(Dir, NewSegId), LogId),
+        NewTid   = truncate_cache(Tid, LogId, Dir, NewSegId),
         FileName = mk_name(Dir, NewSegId),
         {Version, NewFd} = open_writer_fd(false, FileName),
         Idx#idx{ version = Version
@@ -335,13 +335,12 @@ read_entry(Dir, Tid, LogId) ->
 %% @private Truncate cache, from the given logid (inclusive).
 %% re-initialize the cache for last segment in case there are entries deleted.
 %% @end
--spec truncate_cache(cache(), filename(), logid()) -> cache().
-truncate_cache(Tid, NewSegIdxFile, LogId) ->
+-spec truncate_cache(cache(), logid(), dirname(), segid()) -> cache().
+truncate_cache(Tid, LogId, Dir, LatestSegId) ->
   Ms = ets:fun2ms(fun(?ENTRY(LogIdX, _, _, _)) -> LogIdX >= LogId end),
   _  = ets:select_delete(Tid, Ms),
   %%   To make sure that the latest entry is always in cache.
-  ok = restore_latest_cache_entry_from_file(NewSegIdxFile, Tid),
-  Tid.
+  restore_latest_cache_entry_from_file(Tid, Dir, LatestSegId).
 
 %% @private Get the latest cached entry which has timestamp before the given Ts.
 -spec latest_cached_entry_before_ts(cache(), os_sec(), logid(), logid(), logid()) ->
@@ -529,27 +528,21 @@ init_cache_from_file(_Version = 1, Tid, SegId, Fd) ->
   end.
 
 %% @private Restore ets table record from index latest entry.
--spec restore_latest_cache_entry_from_file(filename(), cache()) -> ok.
-restore_latest_cache_entry_from_file(FileName, Tid) ->
-  SegId = gululog_name:filename_to_segid(FileName),
-  Fd = open_reader_fd(FileName),
-  try file:read(Fd, 1) of
-    eof                 ->
-      ok;
-    {ok, <<Version:8>>} ->
-      ok = restore_latest_cache_entry_from_file(Version, Tid, Fd, SegId)
+%% Assuming the file is not empty with index entires.
+%% @end
+-spec restore_latest_cache_entry_from_file(cache(), dirname(), segid()) -> cache().
+restore_latest_cache_entry_from_file(Tid, Dir, SegId) ->
+  Fd = open_reader_fd(mk_name(Dir, SegId)),
+  try
+    {ok, <<Version:8>>} = file:read(Fd, 1),
+    {ok, EofPosition}   = file:position(Fd, eof),
+    EntrySize           = file_entry_bytes(Version),
+    {ok, EntryBin}      = file:pread(Fd, EofPosition - EntrySize, EntrySize),
+    true                = ets:insert(Tid, from_file_entry(Version, SegId, EntryBin)),
+    Tid
   after
     ok = file:close(Fd)
   end.
-
--spec restore_latest_cache_entry_from_file(logvsn(), cache(), file:fd(), segid()) -> ok.
-restore_latest_cache_entry_from_file(Version, Tid, Fd, SegId) ->
-  {ok, EofPosition} = file:position(Fd, eof),
-  EntrySize         = file_entry_bytes(Version),
-  {ok, ChunkBin}    = file:pread(Fd, EofPosition - EntrySize, EntrySize),
-  [ ets:insert(Tid, from_file_entry(1, SegId, <<E:?FILE_ENTRY_BITS_V1>>))
-    || <<E:?FILE_ENTRY_BITS_V1>> <= ChunkBin],
-  ok.
 
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
