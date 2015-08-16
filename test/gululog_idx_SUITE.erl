@@ -81,8 +81,8 @@ t_basic_flow(Config) when is_list(Config) ->
   {Idx4, {4, _}} = gululog_idx:delete_oldest_seg(Dir, Idx3, ?undef),
   %% nothing left (segment 5 is empty)
   {Idx5, false} = gululog_idx:delete_oldest_seg(Dir, Idx4, ?undef),
-  %% verify nothing left
-  ?assertMatch(false, gululog_idx:get_latest_logid(Idx5)),
+  %% verify last entry still kept
+  ?assertMatch(4, gululog_idx:get_latest_logid(Idx5)),
   ok = gululog_idx:flush_close(Idx5).
 
 %% @doc Init from existing files.
@@ -106,8 +106,8 @@ t_init_from_existing(Config) when is_list(Config) ->
             , {3, {2, 50}}
             , {4, {4, 1}}
             ],
-  Index = gululog_idx:switch(Dir, Index0, _NextLogId = 4),
-  Index = gululog_idx:append(Index, 4, 1, ts()),
+  Index1 = gululog_idx:switch(Dir, Index0, _NextLogId = 4),
+  Index  = gululog_idx:append(Index1, 4, 1, ts()),
   lists:foreach(fun({LogId, ExpectedLocation}) ->
                   Location = gululog_idx:locate(Dir, Index, LogId),
                   ?assertEqual(ExpectedLocation, Location)

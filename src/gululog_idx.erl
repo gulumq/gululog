@@ -50,6 +50,7 @@
              , fd      :: file:fd()
              , tid     :: cache()
              , options :: options()
+             , latest  :: false | entry()
              }).
 
 -opaque index() :: #idx{}.
@@ -100,6 +101,7 @@ init(IndexFiles, Options) ->
       , fd      = WriterFd
       , tid     = NewTid
       , options = Options
+      , latest  = get_latest_entry_in_file(SegId, LatestSegment)
       }.
 
 %% @doc Close write fd, delete ets cache table.
@@ -116,14 +118,16 @@ flush_close(#idx{fd = Fd, tid = Tid}) ->
 %% 3. Position should be (at least MIN_LOG_SIZE) greater than the latest position
 %% @end
 -spec append(index(), logid(), position(), os_sec()) -> index().
-append(#idx{ version = ?LOGVSN
-           , segid   = SegId
-           , fd      = Fd
-           , tid     = Tid
+append(#idx{ version  = ?LOGVSN
+           , segid    = SegId
+           , fd       = Fd
+           , tid      = Tid
+           , options  = Options
            } = Idx, LogId, Position, Ts) ->
-  ok   = file:write(Fd, ?FILE_ENTRY(LogId, Ts, SegId, Position)),
-  true = ets:insert(Tid,     ?ENTRY(LogId, Ts, SegId, Position)),
-  Idx.
+  CacheEntry = ?ENTRY(LogId, Ts, SegId, Position),
+  ok = file:write(Fd, ?FILE_ENTRY(LogId, Ts, SegId, Position)),
+  NewTid = maybe_insert(Tid, CacheEntry, Options),
+  Idx#idx{tid = NewTid, latest = CacheEntry}.
 
 %% @doc Switch to a new log segment
 -spec switch(dirname(), index(), logid()) -> index().
@@ -143,9 +147,8 @@ switch_append(Dir, Idx, LogId, Position, Ts) ->
 %% return {segid(), position()} if the given LogId is found
 %% return 'false' if not in valid range
 %% @end
--spec locate(dirname(), index() | cache(), logid()) -> false | location().
-locate(Dir, #idx{tid = Tid}, LogId) -> locate(Dir, Tid, LogId);
-locate(Dir, Tid, LogId)             -> to_location(read_entry(Dir, Tid, LogId)).
+-spec locate(dirname(), index(), logid()) -> false | location().
+locate(Dir, Idx, LogId) -> to_location(read_entry(Dir, Idx, LogId)).
 
 %% @doc Delete oldest segment from index.
 %% Return the new index and the deleted file with OP tag
@@ -178,35 +181,24 @@ get_oldest_segid(#idx{tid = Tid}) ->
   end.
 
 %% @doc Get the first logid since the given timestamp (inclusive).
--spec first_logid_since(dirname(), index() | cache(), os_sec()) -> false | logid().
-first_logid_since(Dir, #idx{tid = Tid}, Ts) ->
-  first_logid_since(Dir, Tid, Ts);
-first_logid_since(Dir, Tid, Ts) ->
+-spec first_logid_since(dirname(), index(), os_sec()) -> false | logid().
+first_logid_since(Dir, #idx{tid = Tid, latest = LatestEntry}, Ts) ->
   not is_empty_cache(Tid) andalso
-  find_first_logid_since(Dir, Tid, Ts).
+  find_first_logid_since(Dir, Tid, LatestEntry, Ts).
 
 %% @doc Get latest logid from index.
 %% return 'false' if it is an empty index.
 %% @end
--spec get_latest_logid(index() | cache()) -> logid() | false.
-get_latest_logid(#idx{tid = Tid}) ->
-  get_latest_logid(Tid);
-get_latest_logid(Tid) ->
-  case ets:last(Tid) of
-    ?EOT  -> false;
-    LogId -> LogId
-  end.
+-spec get_latest_logid(index()) -> logid() | false.
+get_latest_logid(#idx{latest = false})                            -> false;
+get_latest_logid(#idx{latest = ?ENTRY(LogId, _Ts, _SegId, _Pos)}) -> LogId.
 
 %% @doc Get timestamp of the latest index entry.
 %% Return false in case index is empty.
 %% @end
--spec get_latest_ts(index() | cache()) -> os_sec() | false.
-get_latest_ts(#idx{tid = Tid}) -> get_latest_ts(Tid);
-get_latest_ts(Tid) ->
-  case last_in_cache(Tid) of
-    false                            -> false;
-    ?ENTRY(_LogId, Ts, _SegId, _Pos) -> Ts
-  end.
+-spec get_latest_ts(index()) -> os_sec() | false.
+get_latest_ts(#idx{latest = false})                            -> false;
+get_latest_ts(#idx{latest = ?ENTRY(_LogId, Ts, _SegId, _Pos)}) -> Ts.
 
 %% @doc Get timestamp of the oldest index entry in the given segment.
 %% Retrun false in case no such segment.
@@ -247,26 +239,17 @@ get_position_in_index_file(FileName, LogId) ->
 %% Return new index.
 %% NB! Refuse to delete the first log entry of each segment (i.e. when segid = logid).
 %% @end
--spec delete_from_cache(index() | cache(), logid()) -> cache() | index().
+-spec delete_from_cache(index(), logid()) -> index().
 delete_from_cache(#idx{tid = Tid} = Idx, LogId) ->
-  Tid = delete_from_cache(Tid, LogId),
-  Idx;
-delete_from_cache(Tid, LogId) ->
-  LatestLogId = get_latest_logid(Tid),
-  case LogId =:= LatestLogId of
-    true ->
-      false; %% never delete the latest to keep a correect boundary check
+  case lookup_cache(Tid, LogId) of
     false ->
-      case lookup_cache(Tid, LogId) of
-        false ->
-          false; %% either out of range, or already deleted
-        ?ENTRY( SegId, _Ts, SegId, _Pos) ->
-          false; %% refuse to delete the first entry in one seg
-        ?ENTRY(LogId, _Ts, _SegId, _Pos) ->
-          ets:delete(Tid, LogId)
-      end
+      false; %% either out of range, or not cached, or already deleted
+    ?ENTRY(SegId, _Ts, SegId, _Pos) ->
+      false; %% refuse to delete the first entry in one seg
+    ?ENTRY(LogId, _Ts, _SegId, _Pos) ->
+      ets:delete(Tid, LogId)
   end,
-  Tid.
+  Idx.
 
 %% @doc Truncate from the given logid from cache and index file.
 %% Return new index(), the truncated segid, and a list of deleted segids
@@ -274,7 +257,7 @@ delete_from_cache(Tid, LogId) ->
 -spec truncate(dirname(), index(), segid(), logid(), ?undef | dirname()) ->
         {index(), [file_op()]}.
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
-  false = is_out_of_range(Tid, LogId), %% assert
+  false = is_out_of_range(Idx, LogId), %% assert
   %% Find all the Segids that are greater than the given segid -- to be deleted
   Ms = ets:fun2ms(fun(?ENTRY(I, _Ts, I, _)) when I > SegId -> I end),
   DeleteSegIdList0 = ets:select(Tid, Ms),
@@ -298,43 +281,60 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
         ok = close_cache(Tid),
         init(Dir, SegId, Idx#idx.options);
       PrevLogId ->
-        NewSegId = get_segid(Tid, PrevLogId),
-        NewTid   = truncate_cache(Tid, LogId, Dir, NewSegId),
-        FileName = mk_name(Dir, NewSegId),
+        NewSegId  = get_segid(Tid, PrevLogId),
+        NewTid    = truncate_cache(Tid, LogId),
+        FileName  = mk_name(Dir, NewSegId),
+        LastEntry = get_latest_entry_in_file(NewSegId, FileName),
         {Version, NewFd} = open_writer_fd(FileName),
         Idx#idx{ version = Version
                , fd      = NewFd
                , segid   = NewSegId
                , tid     = NewTid
+               , latest  = LastEntry
                }
     end,
   {NewIdx, FileOpList1 ++ FileOpList2}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
+-spec maybe_insert(cache(), entry(), options()) -> cache().
+maybe_insert(Tid, ?ENTRY(SegId, _Ts, SegId, _Position) = Entry, _Options) ->
+  %% always insert the latest
+  true = ets:insert(Tid, Entry),
+  Tid;
+maybe_insert(Tid, ?ENTRY(LogId, _Ts, _SegId, _Position) = Entry, Options) ->
+  ?ENTRY(LastLogId, _, _, _) = last_in_cache(Tid),
+  Policy = keyget(cache_policy, Options, ?GULULOG_DEFAULT_CACHE_POLICY),
+  is_cache_policy_met(LastLogId, LogId, Policy) andalso
+    ets:insert(Tid, Entry),
+  Tid.
+
+-spec is_cache_policy_met(logid(), logid(), cache_policy()) -> boolean().
+is_cache_policy_met(_LastLogId, _LogId, minimum)    -> false;
+is_cache_policy_met(_LastLogId, _logId, all)        -> true;
+is_cache_policy_met(LastLogId, LogId, {every, Nth}) -> LogId - LastLogId >= Nth.
+
+%% @private Get position info from index entry.
 -spec to_location(false | entry()               ) -> false | location().
 to_location(                               false) -> false;
 to_location(?ENTRY(_LogId, _Ts, SegId, Position)) -> {SegId, Position}.
 
 %% @private Read entry from cache, read from file if deleted from cache.
--spec read_entry(dirname(), index() | cache(), logid()) -> false | entry().
-read_entry(Dir, #idx{tid = Tid}, LogId) -> read_entry(Dir, Tid, LogId);
-read_entry(Dir, Tid, LogId) ->
-  not is_out_of_range(Tid, LogId) andalso
+-spec read_entry(dirname(), index(), logid()) -> false | entry().
+read_entry(Dir, #idx{tid = Tid} = Idx, LogId) ->
+  not is_out_of_range(Idx, LogId) andalso
   case lookup_cache(Tid, LogId) of
     false -> read_file_entry(Dir, get_segid(Tid, LogId), LogId);
     Entry -> Entry
   end.
 
 %% @private Truncate cache, from the given logid (inclusive).
-%% re-initialize the cache for last segment in case there are entries deleted.
 %% @end
--spec truncate_cache(cache(), logid(), dirname(), segid()) -> cache().
-truncate_cache(Tid, LogId, Dir, LatestSegId) ->
+-spec truncate_cache(cache(), logid()) -> cache().
+truncate_cache(Tid, LogId) ->
   Ms = ets:fun2ms(fun(?ENTRY(LogIdX, _, _, _)) -> LogIdX >= LogId end),
   _  = ets:select_delete(Tid, Ms),
-  %%   To make sure that the latest entry is always in cache.
-  restore_latest_cache_entry_from_file(Tid, Dir, LatestSegId).
+  Tid.
 
 %% @private Get the latest cached entry which has timestamp before the given Ts.
 -spec latest_cached_entry_before_ts(cache(), os_sec(), logid(), logid(), logid()) ->
@@ -389,32 +389,37 @@ read_file_entry(Version, Fd, SegId, LogId) ->
 %% Goal: try to use cache as much as possible,
 %%       limit file:open to only ONECE for each find_first_logid_since/3 call
 %% @end
--spec find_first_logid_since(dirname(), cache(), os_sec()) -> false | logid().
-find_first_logid_since(Dir, Tid, Ts) ->
-  ?ENTRY(Lo, TsLo, _, _) = first_in_cache(Tid),
-  ?ENTRY(Hi, TsHi, _, _) = last_in_cache(Tid),
+-spec find_first_logid_since(dirname(), cache(), entry(), os_sec()) -> false | logid().
+find_first_logid_since(Dir, Tid, LatestEntry, Ts) ->
+  ?ENTRY(LogIdLo, TsLo, _, _) = first_in_cache(Tid),
+  ?ENTRY(LogIdHi, TsHi, _, _) = LatestEntry,
   case Ts =< TsLo of
-    true                 -> Lo;    %% all logs are after the given ts
-    false when Ts > TsHi -> false; %% no log since the given ts
+    true                 -> LogIdLo; %% all logs are after the given ts
+    false when Ts > TsHi -> false;   %% no log since the given ts
     false ->                       %% in between
-      Mid = (Lo + Hi) bsr 1,
-      %% Find the latest logid which has timestamp < Ts
+      LogIdMid = (LogIdLo + LogIdHi) bsr 1,
+      %% First, run a quick binary search to locate
+      %% the latest logid which has timestamp < Ts
+      %% Since we always cache at least the first log entry per segment
+      %% the latest logid which has timestmap >= Ts should be found
+      %% in the segment file of the binary search result
       ?ENTRY(LogId1, Ts1, SegId1, _Pos1) =
-        latest_cached_entry_before_ts(Tid, Ts, Lo, Hi, Mid),
+        latest_cached_entry_before_ts(Tid, Ts, LogIdLo, LogIdHi, LogIdMid),
       true = (Ts1 < Ts), %% assert
-      %% Get the next one in cache
-      ?ENTRY(LogId2, Ts2, _SegId2, _Pos2) =
-        next_in_cache(Tid, LogId1),
-      true = (Ts2 >= Ts), %% assert
-      %% Maybe read file to find the result
+      %% Get the upper limit of target logid
+      LogId2 = case next_in_cache(Tid, LogId1) of
+                 false                                 -> LogIdHi;
+                 ?ENTRY(LogId2_, _Ts2, _SegId2, _Pos2) -> LogId2_
+               end,
+      %% Then run another binary search in the file to locate the
+      %% first log entry of timestamp >= Ts
       find_first_logid_since_in_file(Dir, Ts, SegId1, LogId1+1, LogId2)
   end.
 
-%% @private when there might be deleted cache entries for the given timestamp,
+%% @private when there might be skiped/deleted cache entries for the given timestamp,
 %% read .idx file entries to locate the fisrt logid since the given timestamp in case.
 %% @end
--spec find_first_logid_since_in_file(dirname(), os_sec(),
-                                     segid(), logid(), logid()) -> logid().
+-spec find_first_logid_since_in_file(dirname(), os_sec(), segid(), logid(), logid()) -> logid().
 find_first_logid_since_in_file(_Dir, _Ts, _SegId, LogId, LogId) ->
   %% Successive, no cache entry is deleted
   LogId;
@@ -444,14 +449,15 @@ find_first_logid_since_in_file(ReadFun, LogIdLo, LogIdHi, Ts) ->
 
 %% @private Read the latest (last) log entry of the given segment.
 -spec read_latest_in_seg(dirname(), index(), segid()) -> false | entry().
-read_latest_in_seg(_Dir, #idx{tid = Tid, segid = SegId}, SegId) ->
-  %% latest entry is never deleted from cache
-  last_in_cache(Tid);
-read_latest_in_seg(Dir, #idx{tid = Tid, segid = LatestSegId}, SegId) ->
-  not is_out_of_range(Tid, SegId) andalso
-  read_entry(Dir, Tid, find_latest_logid_in_seg(Tid, SegId, LatestSegId)).
+read_latest_in_seg(_Dir, #idx{segid = SegId, latest = Latest}, SegId) ->
+  Latest;
+read_latest_in_seg(Dir, #idx{tid = Tid, segid = LatestSegId} = Idx, SegId) ->
+  not is_out_of_range(Idx, SegId) andalso
+  read_entry(Dir, Idx, find_latest_logid_in_seg(Tid, SegId, LatestSegId)).
 
-%% @private Search backward from a greater segment id to find the last logid of the given segment.
+%% @private Search backward from a greater segment id
+%% to find the last logid of the given segment.
+%% @end
 -spec find_latest_logid_in_seg(cache(), segid(), segid()) -> logid().
 find_latest_logid_in_seg(Tid, SegId, SegIdX) ->
   true = (SegIdX > SegId), %% assert
@@ -483,10 +489,10 @@ get_segid(Tid, LogId) ->
 %% 'true' when trying to locate a 'future' log
 %% or e.g. an old segment has been removed.
 %% @end
--spec is_out_of_range(cache(), logid()) -> boolean().
-is_out_of_range(Tid, LogId) ->
-  Latest = ets:last(Tid),
-  (Latest =:= ?EOT)         orelse %% empty table
+-spec is_out_of_range(index(), logid()) -> boolean().
+is_out_of_range(#idx{tid = Tid} = Idx, LogId) ->
+  Latest = get_latest_logid(Idx),
+  (Latest =:= false)        orelse %% empty table
   (Latest < LogId)          orelse %% too new
   (ets:first(Tid) > LogId).        %% too old
 
@@ -497,17 +503,16 @@ init_cache_from_files(Tid, [FileName | Rest], Options) ->
   NewTid = init_cache_from_file(FileName, Tid, Options),
   init_cache_from_files(NewTid, Rest, Options).
 
--spec init_cache_from_file(filename(), cache(), options()) -> cache().
+-spec init_cache_from_file(filename(), cache(), options()) -> ok.
 init_cache_from_file(FileName, Tid, Options) ->
   SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
-  try file:read(Fd, 1) of
-    eof ->
-      Tid;
-    {ok, <<Version:8>>} ->
-      ok = init_cache_from_file(Version, Tid, SegId, Fd, Options),
-      %% To keep the code logic simple, always try to restore the last
-      do_restore_latest_cache_entry_from_file(Tid, Fd, SegId)
+  try
+    case file:read(Fd, 1) of
+      eof                 -> ok;
+      {ok, <<Version:8>>} -> ok = init_cache_from_file(Version, Tid, SegId, Fd, Options)
+    end,
+    Tid
   after
     ok = file:close(Fd)
   end.
@@ -554,31 +559,22 @@ init_cache_from_file_entries({every, Nth}, ReadFun, Pos) ->
   NewPos = ReadFun(1, Pos, Nth - 1),
   init_cache_from_file_entries({every, Nth}, ReadFun, NewPos).
 
-%% @private Restore ets table record from index latest entry.
-%% Assuming the file is not empty with index entires.
-%% @end
--spec restore_latest_cache_entry_from_file(cache(), dirname(), segid()) -> cache().
-restore_latest_cache_entry_from_file(Tid, Dir, SegId) ->
-  Fd = open_reader_fd(mk_name(Dir, SegId)),
+%% @private Read last entry from index file, return false in case empty.
+-spec get_latest_entry_in_file(segid(), filename()) -> false | entry().
+get_latest_entry_in_file(SegId, FileName) ->
+  Fd = open_reader_fd(FileName),
   try
-    do_restore_latest_cache_entry_from_file(Tid, Fd, SegId)
+    {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
+    {ok, EofPosition}   = file:position(Fd, eof),
+    EntryBytes          = file_entry_bytes(Version),
+    EofPosition >= EntryBytes+1 andalso
+    begin
+      {ok, EntryBin} = file:pread(Fd, EofPosition - EntryBytes, EntryBytes),
+      from_file_entry(Version, SegId, EntryBin)
+    end
   after
     ok = file:close(Fd)
   end.
-
--spec do_restore_latest_cache_entry_from_file(cache(), file:fd(), segid()) -> cache().
-do_restore_latest_cache_entry_from_file(Tid, Fd, SegId) ->
-  {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
-  {ok, EofPosition}   = file:position(Fd, eof),
-  EntryBytes          = file_entry_bytes(Version),
-  case EofPosition < EntryBytes of
-    true ->
-      ok;
-    false ->
-      {ok, EntryBin} = file:pread(Fd, EofPosition - EntryBytes, EntryBytes),
-      true = ets:insert(Tid, from_file_entry(Version, SegId, EntryBin))
-  end,
-  Tid.
 
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
@@ -727,6 +723,7 @@ idx_options(Options) ->
 
 -define(cache_all, [{cache_policy, all}]).
 -define(cache_min, [{cache_policy, minimum}]).
+-define(cache_nth(N), [{cache_policy, {every, N}}]).
 
 cache_help_fun_test() ->
   {ok, Cwd} = file:get_cwd(),
@@ -864,7 +861,7 @@ gululog_idx_test_() ->
           Dir             = test_dir(),
           BackupDir       = filename:join(Dir, "backup"),
           BackupDirDelete = filename:join(Dir, "backup_delete"),
-          Idx0 = init(Dir, 0, ?cache_all),
+          Idx0 = init(Dir, 0, ?cache_nth(1)),
           ?assertMatch(
             [ ?ENTRY(0,  _, 0, 1)
             , ?ENTRY(1,  _, 0, 10)
@@ -929,7 +926,7 @@ gululog_idx_test_() ->
           ?assertEqual([], ets:tab2list(Idx17#idx.tid)),
           %% re-init
           ok = flush_close(Idx17),
-          NewIdx = init(Dir, 0, ?cache_min),
+          NewIdx = init(Dir, 0, ?cache_nth(3)),
           NewEtsTable = NewIdx#idx.tid,
           ?assertEqual([], ets:tab2list(NewEtsTable)),
           ok = flush_close(NewIdx),
