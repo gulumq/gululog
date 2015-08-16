@@ -11,14 +11,16 @@
 
 -define(GULULOG_DEFAULT_SEG_MB, 100). %% default segment size in MB
 
--type gululog_cache_policy() :: minimum %% cache only the first and last entry per segment
-                              | all %% cache all log entries in all segments
-                              | {every, pos_integer()}. %% cache every N-th log entries
+-type gululog_cache_policy() ::
+        minimum                 %% cache only the first entry per segment
+      | all                     %% cache all log entries in all segments
+      | {every, pos_integer()}. %% cache every N-th log entries
 
--type gululog_options() :: [ {cache_policy, gululog_cache_policy()}
-                           | {segMB, pos_integer()}
-                           | {init_segid, pos_integer()}
-                           ].
+-type gululog_options() ::
+      [ {cache_policy, gululog_cache_policy()}
+      | {segMB, pos_integer()}
+      | {init_segid, pos_integer()}
+      ].
 
 
 -record(gululog, { logid     :: gululog_logid()

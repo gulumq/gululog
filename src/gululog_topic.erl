@@ -43,6 +43,23 @@
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Initialize topic from the given directory.
+%% Options:
+%%   {cache_policy, CachePolicy}
+%%     where CachePolicy is one of:
+%%       minimum                : cache only the first entry per segment
+%%       all                    : cache all log entries in all segments
+%%       {every, pos_integer()} : cache every N-th log entries
+%%   {segMB, Limit}:
+%%     Segment file size limit (MB), gululog_topic will roll to next 
+%%     segment when the size has *exceeded* this limit.
+%%   {init_segid, FirstLogId}:
+%%     First segment ID to init from, default 0.
+%%     This is to allow a truncated topic to be re-initialized
+%%     from the last logid before trunctation; also, a higher
+%%     level application may need to initialize a topic as a copy
+%%     of a remote topic, this option should be the same as the
+%%     remote first segid of the remote topic.
+%% @end
 -spec init(dirname(), options()) -> topic().
 init(Dir, Options) ->
   SegMB = keyget(segMB, Options, ?GULULOG_DEFAULT_SEG_MB),
