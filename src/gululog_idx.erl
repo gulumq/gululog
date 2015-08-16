@@ -337,8 +337,7 @@ truncate_cache(Tid, LogId) ->
   Tid.
 
 %% @private Get the latest cached entry which has timestamp before the given Ts.
--spec latest_cached_entry_before_ts(cache(), os_sec(), logid(), logid(), logid()) ->
-        entry().
+-spec latest_cached_entry_before_ts(cache(), os_sec(), logid(), logid(), logid()) -> entry().
 latest_cached_entry_before_ts(Tid, _Ts, LogId, _Hi, LogId) ->
   lookup_cache(Tid, LogId);
 latest_cached_entry_before_ts(Tid, Ts, Lo, Hi, LogId) ->
@@ -398,11 +397,8 @@ find_first_logid_since(Dir, Tid, LatestEntry, Ts) ->
     false when Ts > TsHi -> false;   %% no log since the given ts
     false ->                       %% in between
       LogIdMid = (LogIdLo + LogIdHi) bsr 1,
-      %% First, run a quick binary search to locate
+      %% First, run a quick binary search (in cache) to locate
       %% the latest logid which has timestamp < Ts
-      %% Since we always cache at least the first log entry per segment
-      %% the latest logid which has timestmap >= Ts should be found
-      %% in the segment file of the binary search result
       ?ENTRY(LogId1, Ts1, SegId1, _Pos1) =
         latest_cached_entry_before_ts(Tid, Ts, LogIdLo, LogIdHi, LogIdMid),
       true = (Ts1 < Ts), %% assert
@@ -411,7 +407,7 @@ find_first_logid_since(Dir, Tid, LatestEntry, Ts) ->
                  false                                 -> LogIdHi;
                  ?ENTRY(LogId2_, _Ts2, _SegId2, _Pos2) -> LogId2_
                end,
-      %% Then run another binary search in the file to locate the
+      %% Then run another binary search (in the file) to locate the
       %% first log entry of timestamp >= Ts
       find_first_logid_since_in_file(Dir, Ts, SegId1, LogId1+1, LogId2)
   end.
