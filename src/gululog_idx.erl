@@ -412,7 +412,7 @@ find_first_logid_since(Dir, Tid, LatestEntry, Ts) ->
       find_first_logid_since_in_file(Dir, Ts, SegId1, LogId1+1, LogId2)
   end.
 
-%% @private when there might be skiped/deleted cache entries for the given timestamp,
+%% @private when there might be skipped/deleted cache entries for the given timestamp,
 %% read .idx file entries to locate the fisrt logid since the given timestamp in case.
 %% @end
 -spec find_first_logid_since_in_file(dirname(), os_sec(), segid(), logid(), logid()) -> logid().
