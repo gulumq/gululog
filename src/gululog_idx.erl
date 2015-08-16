@@ -8,7 +8,7 @@
 -module(gululog_idx).
 
 %% Write APIs
--export([ init/2              %% Initialize log index from the given log file directory and the first logid
+-export([ init/3              %% Initialize log index from the given log file directory and the first logid
         , flush_close/1       %% close the writer cursor
         , append/4            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
@@ -29,14 +29,11 @@
         ]).
 
 %% APIs for internal use
--export([ init_cache/1
-        , close_cache/1
-        , locate_in_cache/2
+-export([ init/2
         , get_position_in_index_file/2
         ]).
 
 -export_type([ index/0
-             , cache/0
              ]).
 
 %%%*_ MACROS and SPECS =========================================================
@@ -45,11 +42,14 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -type cache() :: ets:tid().
+-type cache_policy() :: gululog_cache_policy().
+-type options() :: gululog_options().
 
 -record(idx, { version :: logvsn()
              , segid   :: segid()
              , fd      :: file:fd()
              , tid     :: cache()
+             , options :: options()
              }).
 
 -opaque index() :: #idx{}.
@@ -75,32 +75,32 @@
 %% The directory is created if not exists already
 %% New index file is initialized if the given directry is empty
 %% @end
--spec init(dirname(), segid()) -> index().
-init(Dir, OldestSegId) ->
+-spec init(dirname(), segid(), options()) -> index().
+init(Dir, OldestSegId, Options) ->
   ok = filelib:ensure_dir(filename:join(Dir, "foo")),
-  {IsNew, IndexFiles} = case wildcard_reversed(Dir) of
-                          []    -> {true, [mk_name(Dir, OldestSegId)]};
-                          Files -> {false, Files}
-                        end,
-  LatestSegment = hd(IndexFiles),
-  SegId = gululog_name:filename_to_segid(LatestSegment),
-  {Version, WriterFd} = open_writer_fd(IsNew, LatestSegment),
-  Tid = init_cache(IndexFiles),
-  #idx{ version = Version
-      , segid   = SegId
-      , fd      = WriterFd
-      , tid     = Tid
-      }.
+  IndexFiles = case wildcard_reversed(Dir) of
+                 []    -> [mk_name(Dir, OldestSegId)];
+                 Files -> Files
+               end,
+  init(IndexFiles, idx_options(Options)).
 
 %% @doc Read index files to populate ets cache table.
--spec init_cache([filename()]) -> cache().
-init_cache(IndexFiles) ->
+-spec init([filename()], options()) -> cache().
+init(IndexFiles, Options) ->
+  LatestSegment = hd(IndexFiles),
+  SegId = gululog_name:filename_to_segid(LatestSegment),
+  {Version, WriterFd} = open_writer_fd(LatestSegment),
   Tid = ets:new(?MODULE, [ ordered_set
                          , public
                          , {read_concurrency, true}
                          ]),
-  ok = init_cache_from_files(Tid, IndexFiles),
-  Tid.
+  NewTid = init_cache_from_files(Tid, IndexFiles, Options),
+  #idx{ version = Version
+      , segid   = SegId
+      , fd      = WriterFd
+      , tid     = NewTid
+      , options = Options
+      }.
 
 %% @doc Close write fd, delete ets cache table.
 -spec flush_close(index()) -> ok.
@@ -130,7 +130,7 @@ append(#idx{ version = ?LOGVSN
 switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
   NewSegId = NextLogId,
   ok = file_sync_close(Fd),
-  {?LOGVSN, NewFd} = open_writer_fd(_IsNew = true, mk_name(Dir, NewSegId)),
+  {?LOGVSN, NewFd} = open_writer_fd(mk_name(Dir, NewSegId)),
   Idx#idx{segid = NewSegId, fd = NewFd}.
 
 %% @doc Switch to a new log segment, append new index entry.
@@ -146,12 +146,6 @@ switch_append(Dir, Idx, LogId, Position, Ts) ->
 -spec locate(dirname(), index() | cache(), logid()) -> false | location().
 locate(Dir, #idx{tid = Tid}, LogId) -> locate(Dir, Tid, LogId);
 locate(Dir, Tid, LogId)             -> to_location(read_entry(Dir, Tid, LogId)).
-
-%% @doc Locate {SegId, Position} for a given LogId
-%% return {segid(), position()} from cached records
-%% @end
--spec locate_in_cache(cache(), logid()) -> false | location().
-locate_in_cache(Tid, LogId) -> to_location(lookup_cache(Tid, LogId)).
 
 %% @doc Delete oldest segment from index.
 %% Return the new index and the deleted file with OP tag
@@ -302,12 +296,12 @@ truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
       false ->
         [] = wildcard_reversed(Dir), %% assert
         ok = close_cache(Tid),
-        init(Dir, SegId);
+        init(Dir, SegId, Idx#idx.options);
       PrevLogId ->
         NewSegId = get_segid(Tid, PrevLogId),
         NewTid   = truncate_cache(Tid, LogId, Dir, NewSegId),
         FileName = mk_name(Dir, NewSegId),
-        {Version, NewFd} = open_writer_fd(false, FileName),
+        {Version, NewFd} = open_writer_fd(FileName),
         Idx#idx{ version = Version
                , fd      = NewFd
                , segid   = NewSegId
@@ -497,35 +491,68 @@ is_out_of_range(Tid, LogId) ->
   (ets:first(Tid) > LogId).        %% too old
 
 %% @private Create ets table to keep the index entries.
-%% TODO: less indexing for earlier segments in case there are too many entries.
-%% @end
--spec init_cache_from_files(cache(), [filename()]) -> ok.
-init_cache_from_files(_Tid, []) -> ok;
-init_cache_from_files(Tid, [FileName | Rest]) ->
-  ok = init_cache_from_file(FileName, Tid),
-  init_cache_from_files(Tid, Rest).
+-spec init_cache_from_files(cache(), [filename()], options()) -> cache().
+init_cache_from_files(Tid, [], _Options) -> Tid;
+init_cache_from_files(Tid, [FileName | Rest], Options) ->
+  NewTid = init_cache_from_file(FileName, Tid, Options),
+  init_cache_from_files(NewTid, Rest, Options).
 
--spec init_cache_from_file(filename(), cache()) -> ok.
-init_cache_from_file(FileName, Tid) ->
+-spec init_cache_from_file(filename(), cache(), options()) -> cache().
+init_cache_from_file(FileName, Tid, Options) ->
   SegId = gululog_name:filename_to_segid(FileName),
   Fd = open_reader_fd(FileName),
   try file:read(Fd, 1) of
-    eof                 -> ok;
-    {ok, <<Version:8>>} -> ok = init_cache_from_file(Version, Tid, SegId, Fd)
+    eof ->
+      Tid;
+    {ok, <<Version:8>>} ->
+      ok = init_cache_from_file(Version, Tid, SegId, Fd, Options),
+      %% To keep the code logic simple, always try to restore the last
+      do_restore_latest_cache_entry_from_file(Tid, Fd, SegId)
   after
     ok = file:close(Fd)
   end.
 
--spec init_cache_from_file(logvsn(), cache(), segid(), file:fd()) -> ok.
-init_cache_from_file(_Version = 1, Tid, SegId, Fd) ->
-  case file:read(Fd, ?FILE_ENTRY_BYTES_V1 * ?FILE_READ_CHUNK) of
-    eof ->
-      ok;
-    {ok, ChunkBin} ->
-      [ ets:insert(Tid, from_file_entry(1, SegId, <<E:?FILE_ENTRY_BITS_V1>>))
-        || <<E:?FILE_ENTRY_BITS_V1>> <= ChunkBin ],
-      init_cache_from_file(1, Tid, SegId, Fd)
-  end.
+-spec init_cache_from_file(logvsn(), cache(), segid(), file:fd(), options()) -> ok.
+init_cache_from_file(Version, Tid, SegId, Fd, Options) ->
+  Policy = keyget(cache_policy, Options, ?GULULOG_DEFAULT_CACHE_POLICY),
+  EntryBytes = file_entry_bytes(Version),
+  EntryBits = EntryBytes * 8,
+  ReadFun =
+    fun(ChunkSize, CurrentPos, SkipEntries) ->
+      case file:read(Fd, EntryBytes * ChunkSize) of
+        eof ->
+          eof;
+        {ok, ChunkBin} ->
+          [ ets:insert(Tid, from_file_entry(Version, SegId, <<E:EntryBits>>))
+            || <<E:EntryBits>> <= ChunkBin ],
+          Pos = CurrentPos + size(ChunkBin),
+          case SkipEntries > 0 of
+            true  ->
+              Pos;
+            false ->
+              {ok, NewPos} = file:position(Fd, Pos + EntryBytes * SkipEntries),
+              NewPos
+            end
+          end
+      end,
+  ok = init_cache_from_file_entries(Policy, ReadFun, _CurrentPos = 1).
+
+-spec init_cache_from_file_entries(cache_policy(), Fun, pos_integer()) -> ok
+        when Fun :: fun((pos_integer(), pos_integer(), pos_integer()) -> eof | pos_integer()).
+init_cache_from_file_entries(_, _ReadFun, eof) ->
+  ok;
+init_cache_from_file_entries(minimum, ReadFun, 1) ->
+  _ = ReadFun(_ChunkSize = 1, _Pos = 1, _SkipEntries = 0),
+  ok;
+init_cache_from_file_entries(all, ReadFun, Pos) ->
+  NewPos = ReadFun(?FILE_READ_CHUNK, Pos, 0),
+  init_cache_from_file_entries(all, ReadFun, NewPos);
+init_cache_from_file_entries({every, 1}, ReadFun, 1) ->
+  init_cache_from_file_entries(all, ReadFun, 1);
+init_cache_from_file_entries({every, Nth}, ReadFun, Pos) ->
+  (is_integer(Nth) andalso Nth > 1) orelse erlang:error({bad_cache_policy, {every, Nth}}),
+  NewPos = ReadFun(1, Pos, Nth - 1),
+  init_cache_from_file_entries({every, Nth}, ReadFun, NewPos).
 
 %% @private Restore ets table record from index latest entry.
 %% Assuming the file is not empty with index entires.
@@ -534,15 +561,24 @@ init_cache_from_file(_Version = 1, Tid, SegId, Fd) ->
 restore_latest_cache_entry_from_file(Tid, Dir, SegId) ->
   Fd = open_reader_fd(mk_name(Dir, SegId)),
   try
-    {ok, <<Version:8>>} = file:read(Fd, 1),
-    {ok, EofPosition}   = file:position(Fd, eof),
-    EntrySize           = file_entry_bytes(Version),
-    {ok, EntryBin}      = file:pread(Fd, EofPosition - EntrySize, EntrySize),
-    true                = ets:insert(Tid, from_file_entry(Version, SegId, EntryBin)),
-    Tid
+    do_restore_latest_cache_entry_from_file(Tid, Fd, SegId)
   after
     ok = file:close(Fd)
   end.
+
+-spec do_restore_latest_cache_entry_from_file(cache(), file:fd(), segid()) -> cache().
+do_restore_latest_cache_entry_from_file(Tid, Fd, SegId) ->
+  {ok, <<Version:8>>} = file:pread(Fd, 0, 1),
+  {ok, EofPosition}   = file:position(Fd, eof),
+  EntryBytes          = file_entry_bytes(Version),
+  case EofPosition < EntryBytes of
+    true ->
+      ok;
+    false ->
+      {ok, EntryBin} = file:pread(Fd, EofPosition - EntryBytes, EntryBytes),
+      true = ets:insert(Tid, from_file_entry(Version, SegId, EntryBin))
+  end,
+  Tid.
 
 %% @private Find all the index files in the given directory
 %% return all filenames in reversed order.
@@ -551,14 +587,16 @@ restore_latest_cache_entry_from_file(Tid, Dir, SegId) ->
 wildcard_reversed(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 
 %% @private Open 'raw' mode fd for writer to 'append'.
--spec open_writer_fd(IsNew :: boolean(), filename()) -> {logvsn(), file:fd()}.
-open_writer_fd(true, FileName) ->
+-spec open_writer_fd(filename()) -> {logvsn(), file:fd()}.
+open_writer_fd(FileName) ->
   {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
-  ok = file:write(Fd, <<?LOGVSN:8>>),
-  {?LOGVSN, Fd};
-open_writer_fd(false, FileName) ->
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
-  {ok, <<Version:8>>} = file:read(Fd, 1),
+  Version = case file:read(Fd, 1) of
+              eof ->
+                file:write(Fd, <<?LOGVSN:8>>),
+                ?LOGVSN;
+              {ok, <<Version_:8>>} ->
+                Version_
+            end,
   {ok, Position} = file:position(Fd, eof),
   %% Hopefully, this assertion never fails,
   %% In case it happens, add a function to truncate the corrupted tail.
@@ -671,15 +709,29 @@ lookup_cache(Tid, LogId) ->
 -spec is_empty_cache(cache()) -> boolean().
 is_empty_cache(Tid) -> ?EOT =:= ets:first(Tid).
 
+%% @private Get value from key-value list, return default if not found
+-spec keyget(Key::term(), [{Key::term(), Value::term()}], Default::term()) -> Value::term().
+keyget(Key, KvList, Default) ->
+  case lists:keyfind(Key, 1, KvList) of
+    {Key, Value} -> Value;
+    false        -> Default
+  end.
+
+idx_options(Options) ->
+  [{K, V} || {K, V} <- Options, K =:= cache_policy].
+
 %%%*_ TESTS ====================================================================
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+-define(cache_all, [{cache_policy, all}]).
+-define(cache_min, [{cache_policy, minimum}]).
+
 cache_help_fun_test() ->
   {ok, Cwd} = file:get_cwd(),
   Dir = filename:join(Cwd, "gululog_idx-cache_help_fun_test"),
-  #idx{tid = Tid} = Idx0 = init(Dir, 0),
+  #idx{tid = Tid} = Idx0 = init(Dir, 0, ?cache_all),
   ?assertEqual(false, first_in_cache(Tid)),
   ?assertEqual(false, last_in_cache(Tid)),
   ?assertEqual(false, prev_logid(Tid, 0)),
@@ -693,7 +745,7 @@ cache_help_fun_test() ->
 basic_find_logid_by_ts_test() ->
   {ok, Cwd} = file:get_cwd(),
   Dir = filename:join(Cwd, "gululog_idx-basic_find_logid_by_ts_test"),
-  Idx0 = init(Dir, 0),
+  Idx0 = init(Dir, 0, ?cache_min),
   ?assertEqual(false, first_logid_since(Dir, Idx0, gululog_dt:os_sec())),
   Ts = gululog_dt:os_sec(),
   VerifyFun = fun(Idx) ->
@@ -715,7 +767,7 @@ basic_find_logid_by_ts_test() ->
 seg_ts_test() ->
   {ok, Cwd} = file:get_cwd(),
   Dir = filename:join(Cwd, "gululog_idx-seg_ts_test"),
-  Idx0 = init(Dir, 0),
+  Idx0 = init(Dir, 0, ?cache_min),
   ?assertEqual(false, get_seg_oldest_ts(Dir, Idx0, 0)),
   ?assertEqual(false, get_seg_latest_ts(Dir, Idx0, 0)),
   FunL =
@@ -801,7 +853,7 @@ gululog_idx_test_() ->
                  ({switch_append, LogId, Position}, IdxIn) ->
                     %% Ts = Logid for deterministic
                     switch_append(Dir, IdxIn, LogId, Position, _Ts = LogId)
-              end, init(Dir, 0), DataList),
+              end, init(Dir, 0, ?cache_min), DataList),
       ok = flush_close(Idx)
     end
   , fun(_) ->
@@ -812,7 +864,7 @@ gululog_idx_test_() ->
           Dir             = test_dir(),
           BackupDir       = filename:join(Dir, "backup"),
           BackupDirDelete = filename:join(Dir, "backup_delete"),
-          Idx0 = init(Dir, 0),
+          Idx0 = init(Dir, 0, ?cache_all),
           ?assertMatch(
             [ ?ENTRY(0,  _, 0, 1)
             , ?ENTRY(1,  _, 0, 10)
@@ -877,7 +929,7 @@ gululog_idx_test_() ->
           ?assertEqual([], ets:tab2list(Idx17#idx.tid)),
           %% re-init
           ok = flush_close(Idx17),
-          NewIdx = init(Dir, 0),
+          NewIdx = init(Dir, 0, ?cache_min),
           NewEtsTable = NewIdx#idx.tid,
           ?assertEqual([], ets:tab2list(NewEtsTable)),
           ok = flush_close(NewIdx),
@@ -888,7 +940,7 @@ gululog_idx_test_() ->
       , fun() ->
           Dir = test_dir(),
           BackupDir = filename:join(Dir, "backup"),
-          Idx0 = init(Dir, 0),
+          Idx0 = init(Dir, 0, ?cache_all),
           DeleteFile1 = mk_name(Dir, 0),
           ?assertEqual({Idx0, {0, {?OP_DELETED, DeleteFile1}}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           ?assertEqual(false, lists:member(DeleteFile1, wildcard_reversed(Dir))),
@@ -902,7 +954,7 @@ gululog_idx_test_() ->
     , { "delete old seg + truncate"
       , fun() ->
           Dir = test_dir(),
-          Idx0 = init(Dir, 0),
+          Idx0 = init(Dir, 0, ?cache_min),
           ?assertMatch({_, {0, _}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           Files = lists:sort(wildcard_reversed(Dir)),
           {Idx1, Truncated} = truncate(Dir, Idx0, 5, 5, ?undef),
@@ -914,7 +966,7 @@ gululog_idx_test_() ->
     , { "delete + find logid by ts"
       , fun() ->
           Dir = test_dir(),
-          Idx0 = init(Dir, 0),
+          Idx0 = init(Dir, 0, ?cache_all),
           TsVerifyFun =
             fun(Idx) ->
               lists:foreach(fun(_Ts = LogId) ->

@@ -36,13 +36,7 @@
 
 -opaque topic() :: #topic{}.
 
--define(DEFAULT_SEG_MB, 100). %% default segment size in MB
-
--type boolean_option() :: atom().
--type option_name() :: atom().
--type option_value() :: term().
--type option() :: [boolean_option() | {option_name(), option_value()}].
--type options() :: [option()].
+-type options() :: gululog_options().
 
 -define(MEGA, 1000000).
 
@@ -51,10 +45,10 @@
 %% @doc Initialize topic from the given directory.
 -spec init(dirname(), options()) -> topic().
 init(Dir, Options) ->
-  SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
+  SegMB = keyget(segMB, Options, ?GULULOG_DEFAULT_SEG_MB),
   InitFromSegId = keyget(init_segid, Options, 0),
   Cur = gululog_w_cur:open(Dir, InitFromSegId),
-  Idx = gululog_idx:init(Dir, InitFromSegId),
+  Idx = gululog_idx:init(Dir, InitFromSegId, Options),
   LastLogId = case gululog_idx:get_latest_logid(Idx) of
                 false -> InitFromSegId - 1;
                 LogId -> LogId

@@ -11,7 +11,7 @@
 
 -include("gululog_priv.hrl").
 
--type cache() :: gululog_idx:cache().
+-type index() :: gululog_idx:index().
 -type r_cursor() :: gululog_r_cur:cursor().
 
 %%%*_ API FUNCTIONS ============================================================
@@ -73,20 +73,20 @@ repair_dir(IdxFiles, SegFiles, BackupDir) ->
         [file_op()].
 repair_seg([], [], _Dir, _BackupDir) -> [];
 repair_seg([IdxFile | _], [SegFile | _], Dir, BackupDir) ->
-  IndexCache = gululog_idx:init_cache([IdxFile]),
+  Idx = gululog_idx:init([IdxFile], [{cache_policy, minimum}]),
   try
-    repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir)
+    repair_seg(Idx, IdxFile, SegFile, Dir, BackupDir)
   after
-    gululog_idx:close_cache(IndexCache)
+    gululog_idx:flush_close(Idx)
   end.
 
--spec repair_seg(cache(), filename(), filename(), dirname(), ?undef | dirname()) ->
+-spec repair_seg(index(), filename(), filename(), dirname(), ?undef | dirname()) ->
         [file_op()].
-repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
-  LatestLogId = gululog_idx:get_latest_logid(IndexCache),
+repair_seg(Idx, IdxFile, SegFile, Dir, BackupDir) ->
+  LatestLogId = gululog_idx:get_latest_logid(Idx),
   SegId = gululog_name:filename_to_segid(IdxFile),
   RCursor = gululog_r_cur:open(Dir, SegId),
-  case integral_pos(SegId, IndexCache, IdxFile, LatestLogId, RCursor) of
+  case integral_pos(Dir, SegId, Idx, IdxFile, LatestLogId, RCursor) of
     bof ->
       %% the whole segment is empty or corrupted
       [gululog_file:delete(IdxFile, BackupDir),
@@ -102,21 +102,21 @@ repair_seg(IndexCache, IdxFile, SegFile, Dir, BackupDir) ->
 %%                3) the entire segment file is corrupted
 %% otherwise return the latest integral positions in index and segment file.
 %% @end
--spec integral_pos(segid(), cache(), filename(), false | logid(), empty | r_cursor()) ->
+-spec integral_pos(dirname(), segid(), index(), filename(), false | logid(), empty | r_cursor()) ->
         bof | {IdxPos::position(), SegPos::position()}.
-integral_pos(_SegId, _IndexCache, _IdxFile, _LogId, empty) ->
+integral_pos(_Dir, _SegId, _Idx, _IdxFile, _LogId, empty) ->
   %% seg file is empty
   bof;
-integral_pos(_SegId, _IndexCache, _IdxFile, false, RCursor) ->
+integral_pos(_Dir, _SegId, _Idx, _IdxFile, false, RCursor) ->
   %% index file has no entry
   ok = gululog_r_cur:close(RCursor),
   bof;
-integral_pos(SegId, _IndexCache, _IdxFile, LogId, RCursor) when LogId < SegId ->
+integral_pos(_Dir, SegId, _Idx, _IdxFile, LogId, RCursor) when LogId < SegId ->
   %% Scaned all the way to the beginning of the segment
   ok = gululog_r_cur:close(RCursor),
   bof;
-integral_pos(SegId, IndexCache, IdxFile, LogId, RCursor0) ->
-  {SegId, Pos} = gululog_idx:locate_in_cache(IndexCache, LogId),
+integral_pos(Dir, SegId, Idx, IdxFile, LogId, RCursor0) ->
+  {SegId, Pos} = gululog_idx:locate(Dir, Idx, LogId),
   RCursor1 = gululog_r_cur:reposition(RCursor0, Pos),
   case try_read_log(RCursor1) of
     {ok, RCursor2} ->
@@ -127,7 +127,7 @@ integral_pos(SegId, IndexCache, IdxFile, LogId, RCursor0) ->
       {IdxPos, SegPos};
     {error, _Reason} ->
       %% not found or corrupted, keep scaning ealier logs
-      integral_pos(SegId, IndexCache, IdxFile, LogId - 1, RCursor1)
+      integral_pos(Dir, SegId, Idx, IdxFile, LogId - 1, RCursor1)
   end.
 
 %% @private Try read a log entry from reader cursor.

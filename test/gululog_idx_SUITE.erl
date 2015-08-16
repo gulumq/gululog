@@ -49,7 +49,7 @@ t_basic_flow({init, Config}) -> Config;
 t_basic_flow({'end', _Config}) -> ok;
 t_basic_flow(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  Index0 = gululog_idx:init(Dir, 0),
+  Index0 = gululog_idx:init(Dir, 0, []),
   ?assertEqual(false, gululog_idx:get_latest_logid(Index0)),
   Events = [ {append, 0, 1}
            , {append, 1, 10}
@@ -98,7 +98,7 @@ t_init_from_existing({init, Config}) ->
 t_init_from_existing({'end', _Config}) -> ok;
 t_init_from_existing(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  Index0 = gululog_idx:init(Dir, 0),
+  Index0 = gululog_idx:init(Dir, 0, []),
   ?assertEqual(3, gululog_idx:get_latest_logid(Index0)),
   Expects = [ {0, {0, 1}}
             , {1, {0, 10}}
@@ -129,7 +129,7 @@ t_read_file_entry_to_locate({init, Config}) ->
 t_read_file_entry_to_locate({'end', _Config}) -> ok;
 t_read_file_entry_to_locate(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  Idx0 = gululog_idx:init(Dir, 0),
+  Idx0 = gululog_idx:init(Dir, 0, [{cache_policy, all}]),
   ?assertEqual(false, gululog_idx:locate(Dir, Idx0, 4)),
   ?assertEqual({0, 10}, gululog_idx:locate(Dir, Idx0, 1)),
   Idx1 = gululog_idx:delete_from_cache(Idx0, 0),
@@ -157,7 +157,7 @@ t_truncated_latest_logid({init, Config}) ->
 t_truncated_latest_logid({'end', _Config}) -> ok;
 t_truncated_latest_logid(Config) when is_list(Config) ->
   Dir = ?config(dir),
-  Idx0 = gululog_idx:init(Dir, 0),
+  Idx0 = gululog_idx:init(Dir, 0, [{cache_policy, all}]),
   ?assertEqual(2, gululog_idx:get_latest_logid(Idx0)),
   Idx1 = gululog_idx:delete_from_cache(Idx0, 1),
   {Idx, _} = gululog_idx:truncate(Dir, Idx1, 0, 2, ?undef),
@@ -168,7 +168,7 @@ t_truncated_latest_logid(Config) when is_list(Config) ->
 
 ts() -> gululog_dt:os_sec().
 
-init_idx(Dir, Events) -> init_idx(Dir, gululog_idx:init(Dir, 0), Events).
+init_idx(Dir, Events) -> init_idx(Dir, gululog_idx:init(Dir, 0, []), Events).
 
 init_idx(_Dir, Idx, []) -> Idx;
 init_idx(Dir, Idx, [{append, LogId, Pos} | Events]) ->
