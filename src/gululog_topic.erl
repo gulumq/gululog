@@ -28,44 +28,49 @@
 
 -record(topic, { dir   = ?INIT_ERR(dir)   :: dirname()
                , segMB = ?INIT_ERR(segMB) :: bytecnt()
+               , init_segid               :: segid()
                , idx                      :: index()
                , cur                      :: cursor()
-               , last_logid               :: -1 | logid()
-               , last_ts                  :: false | os_sec()
                }).
 
 -opaque topic() :: #topic{}.
 
--define(DEFAULT_SEG_MB, 100). %% default segment size in MB
-
--type boolean_option() :: atom().
--type option_name() :: atom().
--type option_value() :: term().
--type option() :: [boolean_option() | {option_name(), option_value()}].
--type options() :: [option()].
+-type options() :: gululog_options().
 
 -define(MEGA, 1000000).
 
 %%%*_ API FUNCTIONS ============================================================
 
 %% @doc Initialize topic from the given directory.
+%% Options:
+%%   {cache_policy, CachePolicy}
+%%     where CachePolicy is one of:
+%%       minimum                : cache only the first entry per segment
+%%       all                    : cache all log entries in all segments
+%%       {every, pos_integer()} : cache every N-th log entries
+%%   {segMB, Limit}:
+%%     Segment file size limit (MB), gululog_topic will roll to next
+%%     segment when the size has *exceeded* this limit.
+%%   {init_segid, FirstLogId}:
+%%     First segment ID to init from, default 0.
+%%     This is to allow a truncated topic to be re-initialized
+%%     from the last logid before trunctation; also, a higher
+%%     level application may need to initialize a topic as a copy
+%%     of a remote topic, this option should be the same as the
+%%     remote first segid of the remote topic.
+%% @end
 -spec init(dirname(), options()) -> topic().
 init(Dir, Options) ->
-  SegMB = keyget(segMB, Options, ?DEFAULT_SEG_MB),
+  SegMB = keyget(segMB, Options, ?GULULOG_DEFAULT_SEG_MB),
   InitFromSegId = keyget(init_segid, Options, 0),
   Cur = gululog_w_cur:open(Dir, InitFromSegId),
-  Idx = gululog_idx:init(Dir, InitFromSegId),
-  LastLogId = case gululog_idx:get_latest_logid(Idx) of
-                false -> InitFromSegId - 1;
-                LogId -> LogId
-              end,
+  Idx = gululog_idx:init(Dir, InitFromSegId, Options),
   Topic =
     #topic{ dir        = Dir
           , idx        = Idx
           , cur        = Cur
           , segMB      = SegMB
-          , last_logid = LastLogId
-          , last_ts    = gululog_idx:get_latest_ts(Idx)
+          , init_segid = InitFromSegId
           },
   maybe_switch_to_new_version(Topic).
 
@@ -78,10 +83,8 @@ append(#topic{ dir        = Dir
              , idx        = Idx
              , cur        = Cur
              , segMB      = SegMB
-             , last_logid = LastLogId
-             , last_ts    = LastTs
              } = Topic, Header, Body) ->
-  LogId = next_logid(LastLogId),
+  LogId = next_logid(Topic),
   Position = gululog_w_cur:next_log_position(Cur),
   %% NB! Swith before (but NOT after) appending.
   %% this is to minimize the chance of requiring a repair at restart.
@@ -91,13 +94,11 @@ append(#topic{ dir        = Dir
       NewIdx = gululog_idx:switch(Dir, Idx, LogId),
       append(Topic#topic{idx = NewIdx, cur = NewCur}, Header, Body);
     false ->
-      Ts     = next_ts(LastTs),
+      Ts     = next_ts(gululog_idx:get_latest_logid(Idx)),
       NewCur = gululog_w_cur:append(Cur, LogId, Header, Body),
       NewIdx = gululog_idx:append(Idx, LogId, Position, Ts),
       Topic#topic{ cur        = NewCur
                  , idx        = NewIdx
-                 , last_logid = LogId
-                 , last_ts    = Ts
                  }
   end.
 
@@ -105,10 +106,9 @@ append(#topic{ dir        = Dir
 %% This is the information in reply to the producers.
 %% @end
 -spec get_latest_logid_and_ts(topic()) -> false | {logid(), os_sec()}.
-get_latest_logid_and_ts(#topic{ last_logid = LogId
-                              , last_ts    = Ts
-                              }) ->
-  Ts =/= false andalso {LogId, Ts}.
+get_latest_logid_and_ts(#topic{idx = Idx}) ->
+  LogId = gululog_idx:get_latest_logid(Idx),
+  LogId =/= false andalso {LogId, gululog_idx:get_latest_ts(Idx)}.
 
 %% @doc Get the age (in seconds) of the oldest segment.
 %% The age of a segment = the age of the latest log entrie in the segment.
@@ -138,9 +138,8 @@ close(#topic{idx = Idx, cur = Cur}) ->
 force_switch(#topic{ dir        = Dir
                    , idx        = Idx
                    , cur        = Cur
-                   , last_logid = LastLogId
                    } = Topic) ->
-  LogId  = next_logid(LastLogId),
+  LogId  = next_logid(Topic),
   NewCur = gululog_w_cur:switch(Dir, Cur, LogId),
   NewIdx = gululog_idx:switch(Dir, Idx, LogId),
   Topic#topic{ idx = NewIdx
@@ -189,7 +188,11 @@ delete_oldest_seg(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, BackupDir) ->
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 %% @private Keep logid sequential.
-next_logid(LogId) when is_integer(LogId) -> LogId + 1.
+next_logid(#topic{init_segid = InitSegId, idx = Idx}) ->
+  case gululog_idx:get_latest_logid(Idx) of
+    false -> InitSegId;
+    LogId -> LogId + 1
+  end.
 
 %% @private Keep timestamp monotonic.
 next_ts(false) ->
