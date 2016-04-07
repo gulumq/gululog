@@ -9,6 +9,7 @@
 
 %% Write APIs
 -export([ init/3              %% Initialize log index from the given log file directory and the first logid
+        , flush/1             %% flush the writer cursor
         , flush_close/1       %% close the writer cursor
         , append/4            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
@@ -103,6 +104,11 @@ init(IndexFiles, Options) ->
       , options = Options
       , latest  = get_latest_entry_in_file(SegId, LatestSegment)
       }.
+
+%% @doc Flush write fd.
+-spec flush(index) -> ok.
+flush(#idx{fd = Fd}) ->
+  ok = file_sync(Fd).
 
 %% @doc Close write fd, delete ets cache table.
 -spec flush_close(index()) -> ok.
@@ -614,7 +620,12 @@ open_reader_fd(FileName) ->
 -spec mk_name(dirname(), segid()) -> filename().
 mk_name(Dir, SegId) -> gululog_name:mk_idx_name(Dir, SegId).
 
-%% @private Sync and and close file.
+%% @private Sync file.
+-spec file_sync(file:fd()) -> ok.
+file_sync(Fd) ->
+  ok = file:sync(Fd).
+
+%% @private Sync and close file.
 -spec file_sync_close(file:fd()) -> ok.
 file_sync_close(Fd) ->
   ok = file:sync(Fd),
