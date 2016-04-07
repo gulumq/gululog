@@ -8,6 +8,7 @@
 
 -export([ open/2
         , append/4
+        , flush/1
         , flush_close/1
         , switch/3
         , switch_append/5
@@ -46,6 +47,11 @@ open(Dir, OldestSegId) ->
     []         -> open_new_seg(Dir, OldestSegId);
     [File | _] -> open_existing_seg(File)
   end.
+
+%% @doc Flush os disk cache.
+-spec flush(cursor()) -> ok.
+flush(#wcur{fd = Fd}) ->
+  ok = file:sync(Fd).
 
 %% @doc Flush os disk cache, close fd.
 -spec flush_close(cursor()) -> ok.
