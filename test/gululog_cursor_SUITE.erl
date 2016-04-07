@@ -77,6 +77,7 @@ t_open_exists(Config) ->
   Dir = ?config(dir),
   W_Cursor2 = gululog_w_cur:open(Dir, 0),
   _ = gululog_w_cur:append(W_Cursor2, 3, <<"header3">>, <<"body3">>),
+  timer:sleep(timer:seconds(2)),
 
   R_Cursor_ = gululog_r_cur:open(Dir, 0),
   {R_Cursor0, Log0} = gululog_r_cur:read(R_Cursor_, []),

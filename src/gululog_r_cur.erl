@@ -58,7 +58,9 @@ open(Dir, SegId) ->
 
 %% @doc Close reader cursor.
 -spec close(cursor()) -> ok.
-close(#rcur{fd = Fd}) -> file:close(Fd).
+close(#rcur{fd = Fd}) ->
+  ok = file:sync(Fd),
+  ok = file:close(Fd).
 
 %% @doc Read one log including head and body.
 -spec read(cursor()) -> {cursor(), log()} | eof.
