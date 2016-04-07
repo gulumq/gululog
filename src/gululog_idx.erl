@@ -581,7 +581,7 @@ wildcard_reversed(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(filename()) -> {logvsn(), file:fd()}.
 open_writer_fd(FileName) ->
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
   Version = case file:read(Fd, 1) of
               eof ->
                 file:write(Fd, <<?LOGVSN:8>>),
@@ -607,7 +607,7 @@ open_reader_fd(DirName, SegId) ->
 %% @private Open 'raw' mode fd for reader.
 -spec open_reader_fd(filename()) -> file:fd().
 open_reader_fd(FileName) ->
-  {ok, Fd} = file:open(FileName, [read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [read, raw, binary, read_ahead]),
   Fd.
 
 %% @private Make index file path/name

@@ -130,7 +130,7 @@ delete_seg(Dir, #wcur{segid = CurrentSegId} = Cur, SegId, BackupDir) ->
 -spec open_existing_seg(filename()) -> cursor().
 open_existing_seg(FileName) ->
   SegId = gululog_name:filename_to_segid(FileName),
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
   {ok, <<Version:8>>} = file:read(Fd, 1),
   true = (Version =< ?LOGVSN), %% assert
   %% In case Version < ?LOGVSN, the caller should
@@ -150,7 +150,7 @@ open_existing_seg(FileName) ->
 %% @private Open a new segment file for writer.
 open_new_seg(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
   ok = file:write(Fd, <<?LOGVSN:8>>),
   #wcur{ version  = ?LOGVSN
        , segid    = SegId
