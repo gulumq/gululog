@@ -15,6 +15,7 @@
 
 %% cases
 -export([ t_basic_flow/1
+        , t_flush/1
         , t_init_with_segid/1
         , t_truncate/1
         , t_delete_oldest_seg/1
@@ -89,6 +90,31 @@ t_basic_flow(Config) when is_list(Config) ->
   ?assertMatch(#gululog{header = <<"header3">>, body = <<"3", _/binary>>}, Log4),
   ?assertEqual(eof, gululog_r_cur:read(C5)),
   ok = gululog_r_cur:close(C5),
+  ok.
+
+t_flush({init, Config}) -> Config;
+t_flush({'end', _Config}) -> ok;
+t_flush(Config) when is_list(Config) ->
+  Dir = ?config(dir),
+  T0 = gululog_topic:init(Dir, [{segMB, 1}]),
+  T1 = gululog_topic:append(T0, <<"header1">>, <<"body1">>),
+  T2 = gululog_topic:append(T1, <<"header2">>, <<"body2">>),
+
+  ok = gululog_topic:flush(T2),
+  C0 = gululog_r_cur:open(Dir, 0),
+  {C1, Log1} = gululog_r_cur:read(C0, []),
+  {C2, Log2} = gululog_r_cur:read(C1, []),
+  ?assertMatch(#gululog{ header = <<"header1">>
+                       , body   = <<"body1">>}, Log1),
+  ?assertMatch(#gululog{ header = <<"header2">>
+                       , body   = <<"body2">>}, Log2),
+
+  T3 = gululog_topic:append(T2, <<"header3">>, <<"body3">>),
+  ok = gululog_topic:flush(T3),
+  {C3, Log3} = gululog_r_cur:read(C2, []),
+  ?assertMatch(#gululog{ header = <<"header3">>
+                       , body   = <<"body3">>}, Log3),
+  ?assertMatch(eof, gululog_r_cur:read(C3, [])),
   ok.
 
 %% @doc Init topic with a given segid as the first one.

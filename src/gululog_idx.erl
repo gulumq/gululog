@@ -9,6 +9,7 @@
 
 %% Write APIs
 -export([ init/3              %% Initialize log index from the given log file directory and the first logid
+        , flush/1             %% flush the writer cursor
         , flush_close/1       %% close the writer cursor
         , append/4            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
@@ -103,6 +104,11 @@ init(IndexFiles, Options) ->
       , options = Options
       , latest  = get_latest_entry_in_file(SegId, LatestSegment)
       }.
+
+%% @doc Flush write fd.
+-spec flush(index) -> ok.
+flush(#idx{fd = Fd}) ->
+  ok = file_sync(Fd).
 
 %% @doc Close write fd, delete ets cache table.
 -spec flush_close(index()) -> ok.
@@ -581,7 +587,7 @@ wildcard_reversed(Dir) -> gululog_name:wildcard_idx_name_reversed(Dir).
 %% @private Open 'raw' mode fd for writer to 'append'.
 -spec open_writer_fd(filename()) -> {logvsn(), file:fd()}.
 open_writer_fd(FileName) ->
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
   Version = case file:read(Fd, 1) of
               eof ->
                 file:write(Fd, <<?LOGVSN:8>>),
@@ -607,14 +613,19 @@ open_reader_fd(DirName, SegId) ->
 %% @private Open 'raw' mode fd for reader.
 -spec open_reader_fd(filename()) -> file:fd().
 open_reader_fd(FileName) ->
-  {ok, Fd} = file:open(FileName, [read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [read, raw, binary, read_ahead]),
   Fd.
 
 %% @private Make index file path/name
 -spec mk_name(dirname(), segid()) -> filename().
 mk_name(Dir, SegId) -> gululog_name:mk_idx_name(Dir, SegId).
 
-%% @private Sync and and close file.
+%% @private Sync file.
+-spec file_sync(file:fd()) -> ok.
+file_sync(Fd) ->
+  ok = file:sync(Fd).
+
+%% @private Sync and close file.
 -spec file_sync_close(file:fd()) -> ok.
 file_sync_close(Fd) ->
   ok = file:sync(Fd),

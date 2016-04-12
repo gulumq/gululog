@@ -8,6 +8,7 @@
 
 -export([ open/2
         , append/4
+        , flush/1
         , flush_close/1
         , switch/3
         , switch_append/5
@@ -46,6 +47,11 @@ open(Dir, OldestSegId) ->
     []         -> open_new_seg(Dir, OldestSegId);
     [File | _] -> open_existing_seg(File)
   end.
+
+%% @doc Flush os disk cache.
+-spec flush(cursor()) -> ok.
+flush(#wcur{fd = Fd}) ->
+  ok = file:sync(Fd).
 
 %% @doc Flush os disk cache, close fd.
 -spec flush_close(cursor()) -> ok.
@@ -130,7 +136,7 @@ delete_seg(Dir, #wcur{segid = CurrentSegId} = Cur, SegId, BackupDir) ->
 -spec open_existing_seg(filename()) -> cursor().
 open_existing_seg(FileName) ->
   SegId = gululog_name:filename_to_segid(FileName),
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
   {ok, <<Version:8>>} = file:read(Fd, 1),
   true = (Version =< ?LOGVSN), %% assert
   %% In case Version < ?LOGVSN, the caller should
@@ -150,7 +156,7 @@ open_existing_seg(FileName) ->
 %% @private Open a new segment file for writer.
 open_new_seg(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
-  {ok, Fd} = file:open(FileName, [write, read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
   ok = file:write(Fd, <<?LOGVSN:8>>),
   #wcur{ version  = ?LOGVSN
        , segid    = SegId

@@ -4,6 +4,7 @@
 
 -export([ init/2
         , append/3
+        , flush/1
         , close/1
         , force_switch/1
         , truncate/3
@@ -126,6 +127,12 @@ get_oldest_seg_age_sec(#topic{dir = Dir, idx = Idx}) ->
 -spec first_logid_since(topic(), os_sec()) -> false | logid().
 first_logid_since(#topic{dir = Dir, idx = Idx}, Ts) ->
   gululog_idx:first_logid_since(Dir, Idx, Ts).
+
+%% @doc Flush index and segment writer cursor.
+-spec flush(topic()) -> ok.
+flush(#topic{idx = Idx, cur = Cur}) ->
+  ok = gululog_w_cur:flush(Cur),
+  ok = gululog_idx:flush(Idx).
 
 %% @doc Close index and segment writer cursor.
 -spec close(topic()) -> ok.

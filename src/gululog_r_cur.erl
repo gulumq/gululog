@@ -38,7 +38,7 @@
 -spec open(dirname(), segid()) -> empty | cursor() | no_return().
 open(Dir, SegId) ->
   FileName = mk_name(Dir, SegId),
-  {ok, Fd} = file:open(FileName, [read, raw, binary]),
+  {ok, Fd} = file:open(FileName, [read, raw, binary, read_ahead]),
   try read_version(Fd) of
     empty ->
       ok = file:close(Fd),
