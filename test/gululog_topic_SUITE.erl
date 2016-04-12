@@ -100,8 +100,6 @@ t_flush(Config) when is_list(Config) ->
   T1 = gululog_topic:append(T0, <<"header1">>, <<"body1">>),
   T2 = gululog_topic:append(T1, <<"header2">>, <<"body2">>),
 
-  ?assertMatch(empty, gululog_r_cur:open(Dir, 0)),
-
   ok = gululog_topic:flush(T2),
   C0 = gululog_r_cur:open(Dir, 0),
   {C1, Log1} = gululog_r_cur:read(C0, []),
@@ -112,7 +110,6 @@ t_flush(Config) when is_list(Config) ->
                        , body   = <<"body2">>}, Log2),
 
   T3 = gululog_topic:append(T2, <<"header3">>, <<"body3">>),
-  ?assertEqual(eof, gululog_r_cur:read(C2, [])),
   ok = gululog_topic:flush(T3),
   {C3, Log3} = gululog_r_cur:read(C2, []),
   ?assertMatch(#gululog{ header = <<"header3">>
