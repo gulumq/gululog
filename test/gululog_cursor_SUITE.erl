@@ -50,8 +50,8 @@ t_basic_flow({'end', _Config}) -> ok;
 t_basic_flow(Config) ->
   Dir = ?config(dir),
   W_Cursor_ = gululog_w_cur:open(Dir, 0),
-  W_Cursor0 = gululog_w_cur:append(W_Cursor_, 0, <<"header0">>, <<"body0">>),
-  W_Cursor1 = gululog_w_cur:append(W_Cursor0, 1, <<"header1">>, <<"body1">>),
+  {41, W_Cursor0} = gululog_w_cur:append(W_Cursor_, 0, <<"header0">>, <<"body0">>),
+  {81, W_Cursor1} = gululog_w_cur:append(W_Cursor0, 1, <<"header1">>, <<"body1">>),
   ok = gululog_w_cur:flush_close(W_Cursor1),
   R_Cursor_ = gululog_r_cur:open(Dir, 0),
   {R_Cursor0, Log0} = gululog_r_cur:read(R_Cursor_, _Options = []),
@@ -67,16 +67,16 @@ t_basic_flow(Config) ->
 t_open_exists({init, Config}) ->
   Dir = ?config(dir),
   W_Cursor_ = gululog_w_cur:open(Dir, 0),
-  W_Cursor0 = gululog_w_cur:append(W_Cursor_, 0, <<"header0">>, <<"body0">>),
-  W_Cursor1 = gululog_w_cur:append(W_Cursor0, 1, <<"header1">>, <<"body1">>),
-  W_Cursor2 = gululog_w_cur:switch_append(Dir, W_Cursor1, 2, <<"header2">>, <<"body2">>),
+  {41, W_Cursor0} = gululog_w_cur:append(W_Cursor_, 0, <<"header0">>, <<"body0">>),
+  {81, W_Cursor1} = gululog_w_cur:append(W_Cursor0, 1, <<"header1">>, <<"body1">>),
+  {41, W_Cursor2} = gululog_w_cur:switch_append(Dir, W_Cursor1, 2, <<"header2">>, <<"body2">>),
   ok = gululog_w_cur:flush_close(W_Cursor2),
   Config;
 t_open_exists({'end', _Config}) -> ok;
 t_open_exists(Config) ->
   Dir = ?config(dir),
   W_Cursor2 = gululog_w_cur:open(Dir, 0),
-  _  = gululog_w_cur:append(W_Cursor2, 3, <<"header3">>, <<"body3">>),
+  {81, _} = gululog_w_cur:append(W_Cursor2, 3, <<"header3">>, <<"body3">>),
   ok = gululog_w_cur:flush(W_Cursor2),
 
   R_Cursor_ = gululog_r_cur:open(Dir, 0),

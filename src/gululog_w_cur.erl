@@ -75,7 +75,7 @@ append(#wcur{ version  = Version
   MetaBin = gululog_meta:encode(Version, Meta, Header, Body),
   ok = file:write(Fd, [MetaBin, Header, Body]),
   NewPosition = Position + gululog_meta:calculate_log_size(Version, Meta),
-  Cursor#wcur{position = NewPosition}.
+  {NewPosition, Cursor#wcur{position = NewPosition}}.
 
 %% @doc Switch to a new segment file.
 -spec switch(dirname(), cursor(), logid()) -> cursor().

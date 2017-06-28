@@ -11,9 +11,9 @@
 -export([ init/3              %% Initialize log index from the given log file directory and the first logid
         , flush/1             %% flush the writer cursor
         , flush_close/1       %% close the writer cursor
-        , append/4            %% Append a new log entry to index
+        , append/5            %% Append a new log entry to index
         , switch/3            %% switch to a new segment
-        , switch_append/5     %% switch then append
+        , switch_append/6     %% switch then append
         , delete_oldest_seg/3 %% Delete oldest segment from index, backup it first if necessary
         , delete_from_cache/2 %% Delete given log entry from index cache
         , truncate/5          %% Truncate cache and file from the given logid (inclusive)
@@ -58,14 +58,14 @@
 -type entry() :: {logid(), os_sec(), segid(), position()}.
 
 
--define(ENTRY(LogId, Ts, SegId, Position),
-             {LogId, Ts, SegId, Position}).
+-define(ENTRY(LogId, Ts, SegId, Position, EndPos),
+             {LogId, Ts, SegId, Position, EndPos}).
 
--define(FILE_ENTRY(LogId, Ts, SegId, Position),
-        <<(LogId - SegId):32, Ts:32, Position:32>>).
+-define(FILE_ENTRY(LogId, Ts, SegId, Position, EndPos),
+        <<(LogId - SegId):32, Ts:32, Position:32, EndPos:32>>).
 
--define(FILE_ENTRY_BYTES_V1, 12). %% Number of bytes in file per index entry.
--define(FILE_ENTRY_BITS_V1,  96). %% Number of bits  in file per index entry.
+-define(FILE_ENTRY_BYTES_V1, 16). %% Number of bytes in file per index entry.
+-define(FILE_ENTRY_BITS_V1,  128). %% Number of bits  in file per index entry.
 
 -define(FILE_READ_CHUNK, (1 bsl 10)). %% Number of index entries per file read.
 
@@ -123,15 +123,15 @@ flush_close(#idx{fd = Fd, tid = Tid}) ->
 %% 2. LogId should be monotonic. i.e. NewLogId >= LatestLogId + 1
 %% 3. Position should be (at least MIN_LOG_SIZE) greater than the latest position
 %% @end
--spec append(index(), logid(), position(), os_sec()) -> index().
+-spec append(index(), logid(), position(), position(), os_sec()) -> index().
 append(#idx{ version  = ?LOGVSN
            , segid    = SegId
            , fd       = Fd
            , tid      = Tid
            , options  = Options
-           } = Idx, LogId, Position, Ts) ->
-  CacheEntry = ?ENTRY(LogId, Ts, SegId, Position),
-  ok = file:write(Fd, ?FILE_ENTRY(LogId, Ts, SegId, Position)),
+           } = Idx, LogId, Position, EndPos, Ts) ->
+  CacheEntry = ?ENTRY(LogId, Ts, SegId, Position, EndPos),
+  ok = file:write(Fd, ?FILE_ENTRY(LogId, Ts, SegId, Position, EndPos)),
   NewTid = maybe_insert(Tid, CacheEntry, Options),
   Idx#idx{tid = NewTid, latest = CacheEntry}.
 
@@ -144,10 +144,10 @@ switch(Dir, #idx{fd = Fd} = Idx, NextLogId) ->
   Idx#idx{segid = NewSegId, fd = NewFd}.
 
 %% @doc Switch to a new log segment, append new index entry.
--spec switch_append(dirname(), index(), logid(), position(), os_sec()) -> index().
-switch_append(Dir, Idx, LogId, Position, Ts) ->
+-spec switch_append(dirname(), index(), logid(), position(), position(), os_sec()) -> index().
+switch_append(Dir, Idx, LogId, Position, EndPos, Ts) ->
   NewIdx = switch(Dir, Idx, LogId),
-  append(NewIdx, LogId, Position, Ts).
+  append(NewIdx, LogId, Position, EndPos, Ts).
 
 %% @doc Locate {SegId, Position} for a given LogId
 %% return {segid(), position()} if the given LogId is found
@@ -170,7 +170,7 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index, BackupDir)
   case get_oldest_segid(Index) of
     SegIdToDelete when is_integer(SegIdToDelete) andalso
                        SegIdToDelete < CurrentSegId ->
-      Ms = ets:fun2ms(fun(?ENTRY(_, _, SegId, _)) -> SegId =:= SegIdToDelete end),
+      Ms = ets:fun2ms(fun(?ENTRY(_, _, SegId, _, _)) -> SegId =:= SegIdToDelete end),
       _ = ets:select_delete(Tid, Ms),
       FileOp = gululog_file:delete(mk_name(Dir, SegIdToDelete), BackupDir),
       {Index, {SegIdToDelete, FileOp}};
@@ -182,8 +182,8 @@ delete_oldest_seg(Dir, #idx{tid = Tid, segid = CurrentSegId} = Index, BackupDir)
 -spec get_oldest_segid(index()) -> false | logid().
 get_oldest_segid(#idx{tid = Tid}) ->
   case first_in_cache(Tid) of
-    false                           -> false;
-    ?ENTRY(LogId, _Ts, SegId, _Pos) -> LogId = SegId %% assert
+    false                                    -> false;
+    ?ENTRY(LogId, _Ts, SegId, _Pos, _EndPos) -> LogId = SegId %% assert
   end.
 
 %% @doc Get the first logid since the given timestamp (inclusive).
@@ -196,15 +196,15 @@ first_logid_since(Dir, #idx{tid = Tid, latest = LatestEntry}, Ts) ->
 %% return 'false' if it is an empty index.
 %% @end
 -spec get_latest_logid(index()) -> logid() | false.
-get_latest_logid(#idx{latest = false})                            -> false;
-get_latest_logid(#idx{latest = ?ENTRY(LogId, _Ts, _SegId, _Pos)}) -> LogId.
+get_latest_logid(#idx{latest = false})                                     -> false;
+get_latest_logid(#idx{latest = ?ENTRY(LogId, _Ts, _SegId, _Pos, _EndPos)}) -> LogId.
 
 %% @doc Get timestamp of the latest index entry.
 %% Return false in case index is empty.
 %% @end
 -spec get_latest_ts(index()) -> os_sec() | false.
-get_latest_ts(#idx{latest = false})                            -> false;
-get_latest_ts(#idx{latest = ?ENTRY(_LogId, Ts, _SegId, _Pos)}) -> Ts.
+get_latest_ts(#idx{latest = false})                                     -> false;
+get_latest_ts(#idx{latest = ?ENTRY(_LogId, Ts, _SegId, _Pos, _EndPos)}) -> Ts.
 
 %% @doc Get timestamp of the oldest index entry in the given segment.
 %% Retrun false in case no such segment.
@@ -213,7 +213,7 @@ get_latest_ts(#idx{latest = ?ENTRY(_LogId, Ts, _SegId, _Pos)}) -> Ts.
 get_seg_oldest_ts(Dir, Idx, SegId) ->
   case read_entry(Dir, Idx, SegId) of
     false                   -> false;
-    ?ENTRY(_, Ts, SegId, _) -> Ts
+    ?ENTRY(_, Ts, SegId, _, _) -> Ts
   end.
 
 %% @doc Get timestamp of the latest index entry in the given segment.
@@ -223,7 +223,7 @@ get_seg_oldest_ts(Dir, Idx, SegId) ->
 get_seg_latest_ts(Dir, Idx, SegId) ->
   case read_latest_in_seg(Dir, Idx, SegId) of
     false                   -> false;
-    ?ENTRY(_, Ts, SegId, _) -> Ts
+    ?ENTRY(_, Ts, SegId, _, _) -> Ts
   end.
 
 %% @doc To find the byte offset for the given logid in the index file.
@@ -236,7 +236,7 @@ get_position_in_index_file(FileName, LogId) ->
   Fd = open_reader_fd(FileName),
   try
     {ok, <<Version:8>>} = file:read(Fd, 1),
-    (LogId - SegId) * file_entry_bytes(Version) + 1
+    (LogId - SegId + 1) * file_entry_bytes(Version) + 1
   after
     file:close(Fd)
   end.
@@ -250,9 +250,9 @@ delete_from_cache(#idx{tid = Tid} = Idx, LogId) ->
   case lookup_cache(Tid, LogId) of
     false ->
       false; %% either out of range, or not cached, or already deleted
-    ?ENTRY(SegId, _Ts, SegId, _Pos) ->
+    ?ENTRY(SegId, _Ts, SegId, _Pos, _EndPos) ->
       false; %% refuse to delete the first entry in one seg
-    ?ENTRY(LogId, _Ts, _SegId, _Pos) ->
+    ?ENTRY(LogId, _Ts, _SegId, _Pos, _EndPos) ->
       ets:delete(Tid, LogId)
   end,
   Idx.
@@ -265,51 +265,38 @@ delete_from_cache(#idx{tid = Tid} = Idx, LogId) ->
 truncate(Dir, #idx{tid = Tid, fd = Fd} = Idx, SegId, LogId, BackupDir) ->
   false = is_out_of_range(Idx, LogId), %% assert
   %% Find all the Segids that are greater than the given segid -- to be deleted
-  Ms = ets:fun2ms(fun(?ENTRY(I, _Ts, I, _)) when I > SegId -> I end),
+  Ms = ets:fun2ms(fun(?ENTRY(I, _Ts, I, _, _)) when I > SegId -> I end),
   DeleteSegIdList0 = ets:select(Tid, Ms),
   %% In case truncating from the very beginning, delete instead
-  {SegIdToTruncate, DeleteSegIdList} =
-    case SegId =:= LogId of
-      true  -> {?undef, [SegId | DeleteSegIdList0]};
-      false -> {SegId, DeleteSegIdList0}
-    end,
+  {SegIdToTruncate, DeleteSegIdList} = {SegId, DeleteSegIdList0},
   %% close writer fd
   ok = file_sync_close(Fd),
   %% delete idx file for > segid
   FileOpList1 = truncate_delete_do(DeleteSegIdList, Dir, BackupDir),
   %% truncate idx file for = segid
   FileOpList2 = truncate_truncate_do(Dir, SegIdToTruncate, LogId, BackupDir),
-  NewIdx =
-    %% check if the given logid is the first one
-    case prev_logid(Tid, LogId) of
-      false ->
-        [] = wildcard_reversed(Dir), %% assert
-        ok = close_cache(Tid),
-        init(Dir, SegId, Idx#idx.options);
-      PrevLogId ->
-        NewSegId  = get_segid(Tid, PrevLogId),
-        NewTid    = truncate_cache(Tid, LogId),
-        FileName  = mk_name(Dir, NewSegId),
-        LastEntry = get_latest_entry_in_file(NewSegId, FileName),
-        {Version, NewFd} = open_writer_fd(FileName),
-        Idx#idx{ version = Version
-               , fd      = NewFd
-               , segid   = NewSegId
-               , tid     = NewTid
-               , latest  = LastEntry
-               }
-    end,
+  NewSegId  = get_segid(Tid, LogId),
+  NewTid    = truncate_cache(Tid, LogId),
+  FileName  = mk_name(Dir, NewSegId),
+  LastEntry = get_latest_entry_in_file(NewSegId, FileName),
+  {Version, NewFd} = open_writer_fd(FileName),
+  NewIdx = Idx#idx{ version = Version
+                  , fd      = NewFd
+                  , segid   = NewSegId
+                  , tid     = NewTid
+                  , latest  = LastEntry
+                  },
   {NewIdx, FileOpList1 ++ FileOpList2}.
 
 %%%*_ PRIVATE FUNCTIONS ========================================================
 
 -spec maybe_insert(cache(), entry(), options()) -> cache().
-maybe_insert(Tid, ?ENTRY(SegId, _Ts, SegId, _Position) = Entry, _Options) ->
+maybe_insert(Tid, ?ENTRY(SegId, _Ts, SegId, _Position, _EndPos) = Entry, _Options) ->
   %% always insert the latest
   true = ets:insert(Tid, Entry),
   Tid;
-maybe_insert(Tid, ?ENTRY(LogId, _Ts, _SegId, _Position) = Entry, Options) ->
-  ?ENTRY(LastLogId, _, _, _) = last_in_cache(Tid),
+maybe_insert(Tid, ?ENTRY(LogId, _Ts, _SegId, _Position, _EndPos) = Entry, Options) ->
+  ?ENTRY(LastLogId, _, _, _, _) = last_in_cache(Tid),
   Policy = keyget(cache_policy, Options, ?GULULOG_DEFAULT_CACHE_POLICY),
   is_cache_policy_met(LastLogId, LogId, Policy) andalso
     ets:insert(Tid, Entry),
@@ -322,8 +309,8 @@ is_cache_policy_met(LastLogId, LogId, {every, Nth}) -> LogId - LastLogId >= Nth.
 
 %% @private Get position info from index entry.
 -spec to_location(false | entry()               ) -> false | location().
-to_location(                               false) -> false;
-to_location(?ENTRY(_LogId, _Ts, SegId, Position)) -> {SegId, Position}.
+to_location(                                       false) -> false;
+to_location(?ENTRY(_LogId, _Ts, SegId, Position, EndPos)) -> {SegId, Position, EndPos}.
 
 %% @private Read entry from cache, read from file if deleted from cache.
 -spec read_entry(dirname(), index(), logid()) -> false | entry().
@@ -338,7 +325,7 @@ read_entry(Dir, #idx{tid = Tid} = Idx, LogId) ->
 %% @end
 -spec truncate_cache(cache(), logid()) -> cache().
 truncate_cache(Tid, LogId) ->
-  Ms = ets:fun2ms(fun(?ENTRY(LogIdX, _, _, _)) -> LogIdX >= LogId end),
+  Ms = ets:fun2ms(fun(?ENTRY(LogIdX, _, _, _, _)) -> LogIdX > LogId end),
   _  = ets:select_delete(Tid, Ms),
   Tid.
 
@@ -351,9 +338,9 @@ latest_cached_entry_before_ts(Tid, Ts, Lo, Hi, LogId) ->
     false ->
       %% The entry is perhaps deleted from cache, continue with previous one in cache
       latest_cached_entry_before_ts(Tid, Ts, Lo, Hi, prev_logid(Tid, LogId));
-    ?ENTRY(LogId, TsX, _, _) when TsX < Ts ->
+    ?ENTRY(LogId, TsX, _, _, _) when TsX < Ts ->
       latest_cached_entry_before_ts(Tid, Ts, LogId, Hi, (LogId + Hi) bsr 1);
-    ?ENTRY(LogId, TsX, _, _) when TsX >= Ts ->
+    ?ENTRY(LogId, TsX, _, _, _) when TsX >= Ts ->
       latest_cached_entry_before_ts(Tid, Ts, Lo, LogId, (Lo + LogId) bsr 1)
   end.
 
@@ -396,8 +383,8 @@ read_file_entry(Version, Fd, SegId, LogId) ->
 %% @end
 -spec find_first_logid_since(dirname(), cache(), entry(), os_sec()) -> false | logid().
 find_first_logid_since(Dir, Tid, LatestEntry, Ts) ->
-  ?ENTRY(LogIdLo, TsLo, _, _) = first_in_cache(Tid),
-  ?ENTRY(LogIdHi, TsHi, _, _) = LatestEntry,
+  ?ENTRY(LogIdLo, TsLo, _, _, _) = first_in_cache(Tid),
+  ?ENTRY(LogIdHi, TsHi, _, _, _) = LatestEntry,
   case Ts =< TsLo of
     true                 -> LogIdLo; %% all logs are after the given ts
     false when Ts > TsHi -> false;   %% no log since the given ts
@@ -405,13 +392,13 @@ find_first_logid_since(Dir, Tid, LatestEntry, Ts) ->
       LogIdMid = (LogIdLo + LogIdHi) bsr 1,
       %% First, run a quick binary search (in cache) to locate
       %% the latest logid which has timestamp < Ts
-      ?ENTRY(LogId1, Ts1, SegId1, _Pos1) =
+      ?ENTRY(LogId1, Ts1, SegId1, _Pos1, _EndPos1) =
         latest_cached_entry_before_ts(Tid, Ts, LogIdLo, LogIdHi, LogIdMid),
       true = (Ts1 < Ts), %% assert
       %% Get the upper limit of target logid
       LogId2 = case next_in_cache(Tid, LogId1) of
-                 false                                 -> LogIdHi;
-                 ?ENTRY(LogId2_, _Ts2, _SegId2, _Pos2) -> LogId2_
+                 false                                           -> LogIdHi;
+                 ?ENTRY(LogId2_, _Ts2, _SegId2, _Pos2, _EndPos2) -> LogId2_
                end,
       %% Then run another binary search (in the file) to locate the
       %% first log entry of timestamp >= Ts
@@ -443,9 +430,9 @@ find_first_logid_since_in_file(_ReadFun, LogId, LogId, _Ts) ->
   LogId;
 find_first_logid_since_in_file(ReadFun, LogIdLo, LogIdHi, Ts) ->
   case ReadFun((LogIdLo + LogIdHi) bsr 1) of
-    ?ENTRY(LogIdMi, TsX, _SegId, _Pos) when TsX >= Ts ->
+    ?ENTRY(LogIdMi, TsX, _SegId, _Pos, _EndPos) when TsX >= Ts ->
       find_first_logid_since_in_file(ReadFun, LogIdLo, LogIdMi, Ts);
-    ?ENTRY(LogIdMi, TsX, _SegId, _Pos) when TsX < Ts ->
+    ?ENTRY(LogIdMi, TsX, _SegId, _Pos, _EndPos) when TsX < Ts ->
       find_first_logid_since_in_file(ReadFun, LogIdMi+1, LogIdHi, Ts)
   end.
 
@@ -484,7 +471,7 @@ find_latest_logid_in_seg(Tid, SegId, SegIdX, LogId) ->
 get_segid(Tid, LogId) ->
   case lookup_cache(Tid, LogId) of
     false                  -> get_segid(Tid, prev_logid(Tid, LogId));
-    ?ENTRY(_, _, SegId, _) -> SegId
+    ?ENTRY(_, _, SegId, _, _) -> SegId
   end.
 
 %% @private Check if the given log ID is out of indexing range.
@@ -596,9 +583,13 @@ open_writer_fd(FileName) ->
                 Version_
             end,
   {ok, Position} = file:position(Fd, eof),
-  %% Hopefully, this assertion never fails,
-  %% In case it happens, add a function to truncate the corrupted tail.
-  0 = (Position - 1) rem file_entry_bytes(Version), %% assert
+  case (Position - 1) rem file_entry_bytes(Version) of
+    0 ->
+      ok;
+    N ->
+      file:position(Fd, Position - N),
+      file:truncate(Fd)
+  end,
   {Version, Fd}.
 
 %% @private Get per-version file entry bytes.
@@ -648,12 +639,12 @@ truncate_truncate_do(_Dir, ?undef, _LogId, _BackupDir) -> [];
 truncate_truncate_do(Dir, SegId, LogId, BackupDir) ->
   IdxFile = mk_name(Dir, SegId),
   IdxPosition = get_position_in_index_file(IdxFile, LogId),
-  [_ | _] = gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir). %% assert
+  gululog_file:maybe_truncate(IdxFile, IdxPosition, BackupDir). %% assert
 
 %% @private Convert file binary entry to ets entry.
 -spec from_file_entry(logvsn(), segid(), binary()) -> entry().
-from_file_entry(1, SegId, <<Offset:32, Ts:32, Position:32>>) ->
-  ?ENTRY(SegId + Offset, Ts, SegId, Position).
+from_file_entry(1, SegId, <<Offset:32, Ts:32, Position:32, EndPos:32>>) ->
+  ?ENTRY(SegId + Offset, Ts, SegId, Position, EndPos).
 
 %%%*_ Cache help functions =====================================================
 
@@ -740,7 +731,7 @@ cache_help_fun_test() ->
   ?assertEqual(false, last_in_cache(Tid)),
   ?assertEqual(false, prev_logid(Tid, 0)),
   ?assertEqual(false, next_in_cache(Tid, 0)),
-  #idx{tid = Tid} = append(Idx0, 0, 1, gululog_dt:os_sec()),
+  #idx{tid = Tid} = append(Idx0, 0, 1, 9, gululog_dt:os_sec()),
   ?assertEqual(first_in_cache(Tid), last_in_cache(Tid)),
   ?assertEqual(false, prev_logid(Tid, 0)),
   ?assertEqual(false, next_in_cache(Tid, 0)),
@@ -757,11 +748,11 @@ basic_find_logid_by_ts_test() ->
                 ?assertEqual(0, first_logid_since(Dir, Idx, Ts)),
                 ?assertEqual(false, first_logid_since(Dir, Idx, Ts+1))
               end,
-  Idx1 = append(Idx0, 0, 1, Ts),
+  Idx1 = append(Idx0, 0, 1, 1, Ts),
   VerifyFun(Idx1),
-  Idx2 = append(Idx1, 1, 2, Ts),
+  Idx2 = append(Idx1, 1, 2, 2, Ts),
   VerifyFun(Idx2),
-  Idx3 = append(Idx1, 2, 3, Ts),
+  Idx3 = append(Idx1, 2, 3, 3, Ts),
   VerifyFun(Idx3),
   Idx4 = delete_from_cache(Idx3, 1),
   VerifyFun(Idx4),
@@ -775,19 +766,19 @@ seg_ts_test() ->
   ?assertEqual(false, get_seg_oldest_ts(Dir, Idx0, 0)),
   ?assertEqual(false, get_seg_latest_ts(Dir, Idx0, 0)),
   FunL =
-    [ { fun(Idx) ->  append(Idx, 0, 1, 0) end
+    [ { fun(Idx) ->  append(Idx, 0, 1, 1, 0) end
       , fun(Idx) ->
           ?assertEqual(0, get_seg_oldest_ts(Dir, Idx, 0)),
           ?assertEqual(0, get_seg_latest_ts(Dir, Idx, 0))
         end
       }
-    , { fun(Idx) -> append(Idx, 1, 2, 1) end
+    , { fun(Idx) -> append(Idx, 1, 2, 2, 1) end
       , fun(Idx) ->
           ?assertEqual(0, get_seg_oldest_ts(Dir, Idx, 0)),
           ?assertEqual(1, get_seg_latest_ts(Dir, Idx, 0))
         end
       }
-    , { fun(Idx) -> switch_append(Dir, Idx, 2, 1, 42) end
+    , { fun(Idx) -> switch_append(Dir, Idx, 2, 1, 1, 42) end
       , fun(Idx) ->
           ?assertEqual(0, get_seg_oldest_ts(Dir, Idx, 0)),
           ?assertEqual(1, get_seg_latest_ts(Dir, Idx, 0)),
@@ -795,20 +786,20 @@ seg_ts_test() ->
           ?assertEqual(42, get_seg_latest_ts(Dir, Idx, 2))
         end
       }
-    , { fun(Idx) -> append(Idx, 3, 2, 52) end
+    , { fun(Idx) -> append(Idx, 3, 2, 3, 52) end
       , fun(Idx) ->
           ?assertEqual(42, get_seg_oldest_ts(Dir, Idx, 2)),
           ?assertEqual(52, get_seg_latest_ts(Dir, Idx, 2))
         end
       }
-    , { fun(Idx) -> switch_append(Dir, Idx, 4, 1, 62) end
+    , { fun(Idx) -> switch_append(Dir, Idx, 4, 1, 1, 62) end
       , fun(Idx) ->
           ?assertEqual(42, get_seg_oldest_ts(Dir, Idx, 2)),
           ?assertEqual(52, get_seg_latest_ts(Dir, Idx, 2)),
           ?assertEqual(62, get_seg_oldest_ts(Dir, Idx, 4))
         end
       }
-    , { fun(Idx) -> switch_append(Dir, Idx, 5, 1, 72) end
+    , { fun(Idx) -> switch_append(Dir, Idx, 5, 1, 1, 72) end
       , fun(Idx) ->
           ?assertEqual(42, get_seg_oldest_ts(Dir, Idx, 2)),
           ?assertEqual(52, get_seg_latest_ts(Dir, Idx, 2)),
@@ -838,25 +829,25 @@ gululog_idx_test_() ->
   , fun() ->
       Dir = test_dir(),
       DataList =
-        [ {append,        0, 1}
-        , {append,        1, 10}
-        , {append,        2, 20}
-        , {append,        3, 30}
-        , {append,        4, 40}
-        , {switch_append, 5, 1}
-        , {append,        6, 60}
-        , {switch_append, 7, 1}
-        , {append,        8, 80}
-        , {append,        9, 90}
-        , {append,        10, 100}
+        [ {append,        0, 1 , 9 }
+        , {append,        1, 10, 19}
+        , {append,        2, 20, 29}
+        , {append,        3, 30, 39}
+        , {append,        4, 40, 49}
+        , {switch_append, 5, 1 , 59}
+        , {append,        6, 60, 69}
+        , {switch_append, 7, 1 , 79}
+        , {append,        8, 80, 89}
+        , {append,        9, 90, 99}
+        , {append,        10, 100, 101}
         ],
       Idx = lists:foldl(
-              fun({append, LogId, Position}, IdxIn) ->
+              fun({append, LogId, Position, EndPos}, IdxIn) ->
                     %% Ts = Logid for deterministic
-                    append(IdxIn, LogId, Position, _Ts = LogId);
-                 ({switch_append, LogId, Position}, IdxIn) ->
+                    append(IdxIn, LogId, Position, EndPos, _Ts = LogId);
+                 ({switch_append, LogId, Position, EndPos}, IdxIn) ->
                     %% Ts = Logid for deterministic
-                    switch_append(Dir, IdxIn, LogId, Position, _Ts = LogId)
+                    switch_append(Dir, IdxIn, LogId, Position, EndPos, _Ts = LogId)
               end, init(Dir, 0, ?cache_min), DataList),
       ok = flush_close(Idx)
     end
@@ -870,30 +861,30 @@ gululog_idx_test_() ->
           BackupDirDelete = filename:join(Dir, "backup_delete"),
           Idx0 = init(Dir, 0, ?cache_nth(1)),
           ?assertMatch(
-            [ ?ENTRY(0,  _, 0, 1)
-            , ?ENTRY(1,  _, 0, 10)
-            , ?ENTRY(2,  _, 0, 20)
-            , ?ENTRY(3,  _, 0, 30)
-            , ?ENTRY(4,  _, 0, 40)
-            , ?ENTRY(5,  _, 5, 1)
-            , ?ENTRY(6,  _, 5, 60)
-            , ?ENTRY(7,  _, 7, 1)
-            , ?ENTRY(8,  _, 7, 80)
-            , ?ENTRY(9,  _, 7, 90)
-            , ?ENTRY(10, _, 7, 100)
+            [ ?ENTRY(0,  _, 0, 1 , 9 )
+            , ?ENTRY(1,  _, 0, 10, 19)
+            , ?ENTRY(2,  _, 0, 20, 29)
+            , ?ENTRY(3,  _, 0, 30, 39)
+            , ?ENTRY(4,  _, 0, 40, 49)
+            , ?ENTRY(5,  _, 5, 1 , 59)
+            , ?ENTRY(6,  _, 5, 60, 69)
+            , ?ENTRY(7,  _, 7, 1 , 79)
+            , ?ENTRY(8,  _, 7, 80, 89)
+            , ?ENTRY(9,  _, 7, 90, 99)
+            , ?ENTRY(10, _, 7, 100, 101)
             ], ets:tab2list(Idx0#idx.tid)),
           ?assertException(error, {badmatch, true},
                            truncate(Dir, Idx0, 7, 11, ?undef)),
           Idx12 = Idx0, %% bing lazy to update the suffix number
           %% truncate the last log
           LogId1 = 10,
-          {SegId1, _} = locate(Dir, Idx12, LogId1),
+          {SegId1, _, _} = locate(Dir, Idx12, LogId1),
           {Idx13, Truncated1} = truncate(Dir, Idx12, SegId1, LogId1, ?undef),
           ?assertEqual(7, Idx13#idx.segid),
-          ?assertEqual([{?OP_TRUNCATED, mk_name(Dir, 7)}], Truncated1),
+          ?assertEqual([], Truncated1),
           %% truncate 9
           LogId2 = 9,
-          {SegId2, _} = locate(Dir, Idx13, LogId2),
+          {SegId2, _, _} = locate(Dir, Idx13, LogId2),
           {Idx14, Truncated2} = truncate(Dir, Idx13, SegId2, LogId2, BackupDir),
           ?assertEqual([{?OP_TRUNCATED, mk_name(Dir, 7)}], Truncated2),
           ?assertEqual([mk_name(BackupDir, 7)],
@@ -901,41 +892,41 @@ gululog_idx_test_() ->
           ?assertEqual(7, Idx14#idx.segid),
           %% truncate 7
           LogIdone = 7,
-          {SegIdone, _} = locate(Dir, Idx14, LogIdone),
-          {Idxone,   _} = truncate(Dir, Idx14, SegIdone, LogIdone, ?undef),
-          ?assertEqual(5, Idxone#idx.segid),
+          {SegIdone, _, _} = locate(Dir, Idx14, LogIdone),
+          {Idxone, _} = truncate(Dir, Idx14, SegIdone, LogIdone, ?undef),
+          ?assertEqual(7, Idxone#idx.segid),
           %% truncate 6
           LogId3 = 6,
-          {SegId3, _} = locate(Dir, Idxone, LogId3),
+          {SegId3, _, _} = locate(Dir, Idxone, LogId3),
           {Idx15, Truncated3} = truncate(Dir, Idxone, SegId3, LogId3, BackupDirDelete),
-          ?assertEqual([{?OP_TRUNCATED, mk_name(Dir, 5)}], lists:sort(Truncated3)),
-          ?assertEqual([mk_name(BackupDirDelete, 5)],
+          ?assertEqual([{?OP_DELETED, mk_name(Dir, 7)}], lists:sort(Truncated3)),
+          ?assertEqual([mk_name(BackupDirDelete, 7)],
                         wildcard_reversed(BackupDirDelete)),
           ?assertEqual(5, Idx15#idx.segid),
-          %% truncate 3
-          LogId4 = 3,
-          {Segid4, _} = locate(Dir, Idx15, LogId4),
+          %% truncate 2
+          LogId4 = 2,
+          {Segid4, _, _} = locate(Dir, Idx15, LogId4),
           {Idx16, Truncated4} = truncate(Dir, Idx15, Segid4, LogId4, ?undef),
           ?assertEqual([{?OP_DELETED, mk_name(Dir, 5)},
                         {?OP_TRUNCATED, mk_name(Dir, 0)}],
                        lists:sort(Truncated4)),
           ?assertEqual(0, Idx16#idx.segid),
           ?assertMatch(
-            [ ?ENTRY(0, _, 0, 1)
-            , ?ENTRY(1, _, 0, 10)
-            , ?ENTRY(2, _, 0, 20)
+            [ ?ENTRY(0, _, 0, 1 , 9 )
+            , ?ENTRY(1, _, 0, 10, 19)
+            , ?ENTRY(2, _, 0, 20, 29)
             ], ets:tab2list(Idx16#idx.tid)),
           %% truncate to the very beginning
           LogId5 = 0,
-          {SegId5, _} = locate(Dir, Idx16, LogId5),
+          {SegId5, _, _} = locate(Dir, Idx16, LogId5),
           {Idx17, _}  = truncate(Dir, Idx16, SegId5, LogId5, ?undef),
           ?assertEqual(0, Idx17#idx.segid),
-          ?assertEqual([], ets:tab2list(Idx17#idx.tid)),
+          ?assertMatch([?ENTRY(0, _, 0, 1, 9)], ets:tab2list(Idx17#idx.tid)),
           %% re-init
           ok = flush_close(Idx17),
           NewIdx = init(Dir, 0, ?cache_nth(3)),
           NewEtsTable = NewIdx#idx.tid,
-          ?assertEqual([], ets:tab2list(NewEtsTable)),
+          ?assertMatch([?ENTRY(0, _, 0, 1, 9)], ets:tab2list(NewEtsTable)),
           ok = flush_close(NewIdx),
           ok
         end
@@ -962,7 +953,9 @@ gululog_idx_test_() ->
           ?assertMatch({_, {0, _}}, delete_oldest_seg(Dir, Idx0, ?undef)),
           Files = lists:sort(wildcard_reversed(Dir)),
           {Idx1, Truncated} = truncate(Dir, Idx0, 5, 5, ?undef),
-          FilesDeleted = lists:sort(lists:map(fun({?OP_DELETED, Fn}) -> Fn end, Truncated)),
+          FilesDeleted = lists:sort(lists:map(fun({?OP_TRUNCATED, Fn}) -> Fn;
+                                                 ({?OP_DELETED, Fn}) -> Fn
+                                              end, Truncated)),
           ?assertEqual(Files, FilesDeleted),
           ?assertEqual(5, Idx1#idx.segid)
         end
