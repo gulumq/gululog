@@ -12,6 +12,7 @@
         , flush_close/1
         , switch/3
         , switch_append/5
+        , handle_corrupted_tail/2
         , next_log_position/1
         , truncate/5
         , delete_seg/4
@@ -90,6 +91,13 @@ switch_append(Dir, OldCursor, LogId, Header, Body) ->
   NewCursor = switch(Dir, OldCursor, LogId),
   append(NewCursor, LogId, Header, Body).
 
+%% @doc Handle corrupted tail for write cursor.
+-spec handle_corrupted_tail(cursor(), logid()) -> cursor().
+handle_corrupted_tail(#wcur{fd = Fd, version = Version} = Cur, LogId) ->
+  {ok, _} = file:position(Fd, ?INIT_POSITION),
+  ok = seek_and_truncate_corrupted_w_cur(Fd, ?INIT_POSITION, Version, LogId),
+  Cur.
+
 %% @doc Truncate after given logid from segment file
 %% Return new writer cur and delete segment files
 %% @end
@@ -137,7 +145,7 @@ delete_seg(Dir, #wcur{segid = CurrentSegId} = Cur, SegId, BackupDir) ->
 open_existing_seg(FileName) ->
   SegId = gululog_name:filename_to_segid(FileName),
   {ok, Fd} = file:open(FileName, [write, read, raw, binary, delayed_write]),
-  {ok, <<Version:8>>} = file:read(Fd, 1),
+  {ok, <<Version:8>>} = file:read(Fd, ?INIT_POSITION),
   true = (Version =< ?LOGVSN), %% assert
   %% In case Version < ?LOGVSN, the caller should
   %% switch to the next segment immediately by calling switch/3
@@ -163,6 +171,24 @@ open_new_seg(Dir, SegId) ->
        , position = ?INIT_POSITION
        , fd       = Fd
        }.
+
+%% @private Seek write cursor in order to truncate corrupted tail.
+seek_and_truncate_corrupted_w_cur(Fd, StartPos, Version, LogId) ->
+  MetaSize      = gululog_meta:bytecnt(Version),
+  {ok, MetaBin} = file:pread(Fd, StartPos, MetaSize),
+  Meta          = gululog_meta:decode(Version, MetaBin),
+  MetaLogId     = gululog_meta:logid(Meta),
+  HeaderSize    = gululog_meta:header_size(Meta),
+  BodySize      = gululog_meta:body_size(Meta),
+  NextStartPos  = StartPos + MetaSize + HeaderSize + BodySize,
+  if
+    MetaLogId == LogId ->
+      file:position(Fd, NextStartPos),
+      file:truncate(Fd),
+      ok;
+    true ->
+      seek_and_truncate_corrupted_w_cur(Fd, NextStartPos, Version, LogId)
+  end.
 
 %% @private Make a segment file name.
 mk_name(Dir, SegId) -> gululog_name:mk_seg_name(Dir, SegId).

@@ -596,9 +596,13 @@ open_writer_fd(FileName) ->
                 Version_
             end,
   {ok, Position} = file:position(Fd, eof),
-  %% Hopefully, this assertion never fails,
-  %% In case it happens, add a function to truncate the corrupted tail.
-  0 = (Position - 1) rem file_entry_bytes(Version), %% assert
+  case (Position - 1) rem file_entry_bytes(Version) of
+    0 ->
+      ok;
+    N ->
+      file:position(Fd, Position - N),
+      file:truncate(Fd)
+  end,
   {Version, Fd}.
 
 %% @private Get per-version file entry bytes.
