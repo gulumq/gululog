@@ -116,12 +116,12 @@ integral_pos(_Dir, SegId, _Idx, _IdxFile, LogId, RCursor) when LogId < SegId ->
   ok = gululog_r_cur:close(RCursor),
   bof;
 integral_pos(Dir, SegId, Idx, IdxFile, LogId, RCursor0) ->
-  {SegId, Pos} = gululog_idx:locate(Dir, Idx, LogId),
+  {SegId, Pos, _} = gululog_idx:locate(Dir, Idx, LogId),
   RCursor1 = gululog_r_cur:reposition(RCursor0, Pos),
   case try_read_log(RCursor1) of
     {ok, RCursor2} ->
       %% no corruption, return current logid being scaned
-      IdxPos = gululog_idx:get_position_in_index_file(IdxFile, LogId + 1),
+      IdxPos = gululog_idx:get_position_in_index_file(IdxFile, LogId),
       SegPos = gululog_r_cur:current_position(RCursor2),
       ok = gululog_r_cur:close(RCursor2),
       {IdxPos, SegPos};

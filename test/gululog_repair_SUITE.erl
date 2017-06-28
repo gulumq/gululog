@@ -156,8 +156,8 @@ t_truncate_index_ahead({init, Config}) ->
   ok = gululog_topic:close(Topic1),
   %% write ahead some index entries.
   Idx0 = gululog_idx:init(Dir, 0, []),
-  Idx1 = gululog_idx:append(Idx0, 1, 100, gululog_dt:os_sec()),
-  Idx2 = gululog_idx:append(Idx1, 2, 2000, gululog_dt:os_sec()),
+  Idx1 = gululog_idx:append(Idx0, 1, 100, 1999, gululog_dt:os_sec()),
+  Idx2 = gululog_idx:append(Idx1, 2, 2000, 2999, gululog_dt:os_sec()),
   ok = gululog_idx:flush_close(Idx2),
   Config;
 t_truncate_index_ahead({'end', _Config}) -> ok;
@@ -192,8 +192,8 @@ t_truncate_seg_ahead({init, Config}) ->
   ok = gululog_topic:close(Topic1),
   %% write ahead some log entries in seg file
   Cur0 = gululog_w_cur:open(Dir, 0),
-  Cur1 = gululog_w_cur:append(Cur0, 1, <<"header1">>, <<"body1">>),
-  Cur2 = gululog_w_cur:append(Cur1, 1, <<"header2">>, <<"body2">>),
+  {81, Cur1} = gululog_w_cur:append(Cur0, 1, <<"header1">>, <<"body1">>),
+  {121, Cur2} = gululog_w_cur:append(Cur1, 1, <<"header2">>, <<"body2">>),
   gululog_w_cur:flush_close(Cur2),
   Config;
 t_truncate_seg_ahead({'end', _Config}) -> ok;
@@ -231,7 +231,7 @@ t_empty_seg_file({init, Config}) ->
   ok = gululog_topic:close(Topic1),
   %% switch to new segment, append index entry
   Idx0 = gululog_idx:init(Dir, 0, []),
-  Idx1 = gululog_idx:switch_append(Dir, Idx0, 1, 1, gululog_dt:os_sec()),
+  Idx1 = gululog_idx:switch_append(Dir, Idx0, 1, 1, 10, gululog_dt:os_sec()),
   ok = gululog_idx:flush_close(Idx1),
   %% make an empty segment file
   ok = file:write_file(gululog_name:mk_seg_name(Dir, 1), <<>>),
@@ -268,7 +268,7 @@ t_empty_idx_file({init, Config}) ->
   ok = gululog_topic:close(Topic1),
   %% append a new log entry to segment file
   Cur0 = gululog_w_cur:open(Dir, 0),
-  Cur1 = gululog_w_cur:switch_append(Dir, Cur0, 1, <<"h1">>, <<"b1">>),
+  {_, Cur1} = gululog_w_cur:switch_append(Dir, Cur0, 1, <<"h1">>, <<"b1">>),
   ok = gululog_w_cur:flush_close(Cur1),
   %% make an empty idx file
   ok = file:write_file(gululog_name:mk_idx_name(Dir, 1), <<>>),

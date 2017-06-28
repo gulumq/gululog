@@ -66,14 +66,26 @@ init(Dir, Options) ->
   InitFromSegId = keyget(init_segid, Options, 0),
   Cur = gululog_w_cur:open(Dir, InitFromSegId),
   Idx = gululog_idx:init(Dir, InitFromSegId, Options),
-  Topic =
-    #topic{ dir        = Dir
-          , idx        = Idx
-          , cur        = Cur
-          , segMB      = SegMB
-          , init_segid = InitFromSegId
-          },
-  maybe_switch_to_new_version(Topic).
+  case gululog_idx:get_latest_logid(Idx) of
+    false ->
+      {NewCur, _} =
+        gululog_w_cur:truncate(Dir, Cur, InitFromSegId, 1, ?undef),
+      Topic = #topic{ dir        = Dir
+                    , idx        = Idx
+                    , cur        = NewCur
+                    , segMB      = SegMB
+                    , init_segid = InitFromSegId},
+      maybe_switch_to_new_version(Topic);
+    LogId ->
+      Topic0 = #topic{ dir        = Dir
+                     , idx        = Idx
+                     , cur        = Cur
+                     , segMB      = SegMB
+                     , init_segid = InitFromSegId
+                     },
+      {Topic, _} = truncate(Topic0, LogId, ?undef),
+      Topic
+  end.
 
 %% @doc Append a new log entry to the given topic.
 %% Index and segments are switched to new files in case the segment file has
@@ -96,8 +108,9 @@ append(#topic{ dir        = Dir
       append(Topic#topic{idx = NewIdx, cur = NewCur}, Header, Body);
     false ->
       Ts     = next_ts(gululog_idx:get_latest_logid(Idx)),
-      NewCur = gululog_w_cur:append(Cur, LogId, Header, Body),
-      NewIdx = gululog_idx:append(Idx, LogId, Position, Ts),
+      {EndPos, NewCur} =
+        gululog_w_cur:append(Cur, LogId, Header, Body),
+      NewIdx = gululog_idx:append(Idx, LogId, Position, EndPos, Ts),
       Topic#topic{ cur        = NewCur
                  , idx        = NewIdx
                  }
@@ -159,11 +172,11 @@ truncate(#topic{dir = Dir, idx = Idx, cur = Cur} = Topic, LogId, BackupDir) ->
   case gululog_idx:locate(Dir, Idx, LogId) of
     false ->
       {Topic, []};
-    {SegId, Position} ->
+    {SegId, _Position, EndPos} ->
       {NewIdx, IdxFileOpList} =
         gululog_idx:truncate(Dir, Idx, SegId, LogId, BackupDir),
       {NewCur, SegFileOpList} =
-        gululog_w_cur:truncate(Dir, Cur, SegId, Position, BackupDir),
+        gululog_w_cur:truncate(Dir, Cur, SegId, EndPos, BackupDir),
       NewTopic = Topic#topic{idx = NewIdx, cur = NewCur},
       {maybe_switch_to_new_version(NewTopic),
        IdxFileOpList ++ SegFileOpList}
