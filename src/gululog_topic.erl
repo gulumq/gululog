@@ -64,8 +64,17 @@
 init(Dir, Options) ->
   SegMB = keyget(segMB, Options, ?GULULOG_DEFAULT_SEG_MB),
   InitFromSegId = keyget(init_segid, Options, 0),
-  Cur = gululog_w_cur:open(Dir, InitFromSegId),
+  Cur0 = gululog_w_cur:open(Dir, InitFromSegId),
   Idx = gululog_idx:init(Dir, InitFromSegId, Options),
+  Cur =
+    case gululog_idx:get_latest_logid(Idx) of
+      false ->
+        {NewCur0, _} =
+          gululog_w_cur:truncate(Dir, Cur0, InitFromSegId, 1, ?undef),
+        NewCur0;
+      LogId ->
+        gululog_w_cur:handle_corrupted_tail(Cur0, LogId)
+  end,
   Topic =
     #topic{ dir        = Dir
           , idx        = Idx

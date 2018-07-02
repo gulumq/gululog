@@ -20,6 +20,7 @@
         , t_truncate/1
         , t_delete_oldest_seg/1
         , t_get_oldest_seg_age_seg/1
+        , t_handle_corrupted_tail/1
         ]).
 
 -define(config(KEY), proplists:get_value(KEY, Config)).
@@ -277,6 +278,58 @@ t_get_oldest_seg_age_seg(Config) when is_list(Config) ->
           ?assertEqual(ExpectedAge, gululog_topic:get_oldest_seg_age_sec(Topic)),
           Topic
     end, gululog_topic:init(Dir, []), OpList),
+  ok.
+
+t_handle_corrupted_tail({init, Config}) ->
+  Config;
+t_handle_corrupted_tail({'end', _Config}) ->
+  ok;
+t_handle_corrupted_tail(Config) when is_list(Config) ->
+  %% 1, seg write ok, idx not
+  %% 2, seg write ok, idx write not complete
+  %% 3, seg write not complete
+  Dir = ?config(dir),
+  ChangeList =
+    [ {append, <<"h1">>, <<"b1">>}
+    , {append, <<"h2">>, <<"b2">>}
+    ],
+  %% generate test case data
+  T0 = lists:foldl(
+         fun({append, Header, Body}, IdxIn) ->
+               gululog_topic:append(IdxIn, Header, Body);
+            (force_switch, IdxIn) ->
+               gululog_topic:force_switch(IdxIn)
+         end, gululog_topic:init(Dir, []), ChangeList),
+  ok = gululog_topic:close(T0),
+  IdxFile = idx_name(Dir, 0),
+  SegFile = seg_name(Dir, 0),
+  %% simulate case 1 && 3
+  {ok, Fdw} = file:open(SegFile, [read, write, raw, binary]),
+  file:position(Fdw, eof),
+  file:write(Fdw, <<"c">>),
+  file:close(Fdw),
+  T1 = gululog_topic:init(Dir, []),
+  %% check content via read cursor
+  C0 = gululog_r_cur:open(Dir, 0),
+  {C1, Log0} = gululog_r_cur:read(C0),
+  ?assertMatch(#gululog{header = <<"h1">>, body = <<"b1">>}, Log0),
+  {C2, Log1} = gululog_r_cur:read(C1),
+  ?assertMatch(#gululog{header = <<"h2">>, body = <<"b2">>}, Log1),
+  ?assertEqual(eof, gululog_r_cur:read(C2)),
+  ok = gululog_topic:close(T1),
+  %% simulate case 2
+  {ok, Fdidx} = file:open(IdxFile, [read, write, raw, binary]),
+  {ok, Size} = file:position(Fdidx, eof),
+  file:position(Fdidx, Size - 1),
+  file:truncate(Fdidx),
+  file:close(Fdidx),
+  T2 = gululog_topic:init(Dir, []),
+  %% check content via read cursor
+  C00 = gululog_r_cur:open(Dir, 0),
+  {C01, Log00} = gululog_r_cur:read(C00),
+  ?assertMatch(#gululog{header = <<"h1">>, body = <<"b1">>}, Log00),
+  ?assertEqual(eof, gululog_r_cur:read(C01)),
+  ok = gululog_topic:close(T2),
   ok.
 
 %%%_* Help functions ===========================================================
